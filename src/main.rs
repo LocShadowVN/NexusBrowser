@@ -57,10 +57,10 @@ enum Ev {
 // ======================
 mod state {
     use super::*;
-    
+
     #[derive(Clone, Debug, PartialEq)]
     pub enum TabMode { Normal, Incognito, Tor }
-    
+
     #[derive(Clone, Debug, Default)]
     pub struct TabConfig {
         pub proxy: bool, pub proxy_url: String,
@@ -69,26 +69,26 @@ mod state {
         pub sinkhole: bool, pub cookie: bool,
         pub anti_fp: bool,
     }
-    
+
     #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, Zeroize, ZeroizeOnDrop)]
     pub struct VaultEntry {
         pub domain: String, pub user: String, pub pass: String,
         pub nonce: String, pub salt: String,
         pub created: u64, pub last_used: u64,
     }
-    
+
     #[derive(Clone, Debug, Default, Zeroize, ZeroizeOnDrop)]
     pub struct AiCfg { pub endpoint: String, pub key: String, pub model: String }
-    
+
     #[derive(Clone, Debug, Default)]
     pub struct SyncConfig { pub chrome: bool, pub firefox: bool, pub edge: bool }
-    
+
     #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
     pub struct Bookmark { pub title: String, pub url: String }
 
     #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
     pub struct HistoryEntry { pub url: String, pub title: String, pub time: u64 }
-    
+
     #[derive(Debug)]
     pub struct TabState {
         pub id: Uuid, pub name: String, pub url: String,
@@ -102,16 +102,16 @@ mod state {
         pub last_html: Option<String>,
         pub load_gen: u64,
     }
-    
+
     impl TabState {
         pub fn new(mode: TabMode) -> Self {
             let is_incog = matches!(mode, TabMode::Incognito | TabMode::Tor);
             Self {
                 id: Uuid::new_v4(),
-                name: match mode { 
-                    TabMode::Normal => "New Tab", 
-                    TabMode::Incognito => "Private Tab", 
-                    TabMode::Tor => "Tor Tab" 
+                name: match mode {
+                    TabMode::Normal => "New Tab",
+                    TabMode::Incognito => "Private Tab",
+                    TabMode::Tor => "Tor Tab"
                 }.into(),
                 url: "nexus://home".into(),
                 hist: Vec::with_capacity(32),
@@ -133,12 +133,12 @@ mod state {
                 load_gen: 0,
             }
         }
-        
+
         #[inline] pub fn push_ai(&mut self, r: String, c: String) {
             self.ai_mem.push_back((r, c));
             if self.ai_mem.len() > 40 { self.ai_mem.pop_front(); }
         }
-        
+
         pub fn push_hist(&mut self, url: String) {
             if self.hist.get(self.hist_pos).map(|u| u == &url).unwrap_or(false) { return; }
             if !self.hist.is_empty() && self.hist_pos + 1 < self.hist.len() {
@@ -149,21 +149,21 @@ mod state {
             self.hist_pos = self.hist.len().saturating_sub(1);
             self.last_active = Instant::now();
         }
-        
+
         pub fn go_back(&mut self) -> Option<String> {
             (self.hist_pos > 0).then(|| { self.hist_pos -= 1; self.hist[self.hist_pos].clone() })
         }
-        
+
         pub fn go_fwd(&mut self) -> Option<String> {
-            (self.hist_pos + 1 < self.hist.len()).then(|| { 
-                self.hist_pos += 1; self.hist[self.hist_pos].clone() 
+            (self.hist_pos + 1 < self.hist.len()).then(|| {
+                self.hist_pos += 1; self.hist[self.hist_pos].clone()
             })
         }
-        
+
         pub fn current(&self) -> Option<String> {
             self.hist.get(self.hist_pos).cloned()
         }
-        
+
         pub fn update_client(&mut self) {
             let new_hash = self.cfg_hash();
             if self.client_cfg_hash != new_hash {
@@ -171,7 +171,7 @@ mod state {
                 self.client_cfg_hash = new_hash;
             }
         }
-        
+
         fn cfg_hash(&self) -> u64 {
             use std::hash::{Hash, Hasher};
             let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -183,7 +183,7 @@ mod state {
             h.finish()
         }
     }
-    
+
     #[derive(Debug)]
     pub struct State {
         pub active_tab: usize,
@@ -195,7 +195,7 @@ mod state {
         pub history: Vec<HistoryEntry>,
         pub vault: Vec<VaultEntry>,
     }
-    
+
     impl State {
         pub fn new() -> Self {
             let tabs = vec![TabState::new(TabMode::Normal)];
@@ -210,17 +210,17 @@ mod state {
                 vault: Vec::new(),
             }
         }
-        
+
         #[inline] pub fn active_tab(&self) -> &TabState { &self.tabs[self.active_tab] }
         #[inline] pub fn active_tab_mut(&mut self) -> &mut TabState { &mut self.tabs[self.active_tab] }
-        
+
         pub fn new_tab(&mut self, mode: TabMode) -> usize {
             let idx = self.tabs.len();
             self.tabs.push(TabState::new(mode));
             self.active_tab = idx;
             idx
         }
-        
+
         pub fn close_tab(&mut self, idx: usize) -> bool {
             (self.tabs.len() > 1 && idx < self.tabs.len()).then(|| {
                 self.tabs.remove(idx);
@@ -228,12 +228,12 @@ mod state {
                 if self.active_tab >= self.tabs.len() { self.active_tab = self.tabs.len() - 1; }
             }).is_some()
         }
-        
+
         pub fn switch_tab(&mut self, idx: usize) {
-            (idx < self.tabs.len()).then(|| self.active_tab = idx);
+            if idx < self.tabs.len() { self.active_tab = idx; }
         }
     }
-    
+
     #[derive(Clone, Debug)]
     pub struct GlobalConfig {
         pub ad: bool, pub trk: bool, pub sinkhole: bool, pub anti_fp: bool,
@@ -248,15 +248,16 @@ mod state {
             }
         }
     }
-    
+
     #[derive(Debug, Default, Clone)]
     pub struct SyncState {
         pub config: SyncConfig,
         pub chrome_vault: Vec<VaultEntry>,
         pub firefox_vault: Vec<VaultEntry>,
     }
-    
+
     impl SyncState {
+        // ✅ FIX #6: Trả về số entries MỚI import, không phải tổng tất cả
         pub fn import_from_browser(&mut self, browser: &str) -> usize {
             let entries = match browser {
                 "chrome" => super::sync::import_from_chrome(),
@@ -264,16 +265,18 @@ mod state {
                 "edge" => super::sync::import_from_edge(),
                 _ => Ok(Vec::new()),
             }.unwrap_or_default();
-            
+
+            let count = entries.len(); // ✅ lưu trước khi move
+
             match browser {
                 "chrome" => self.chrome_vault = entries,
                 "firefox" => self.firefox_vault = entries,
                 "edge" => self.chrome_vault.extend(entries),
                 _ => {}
             }
-            self.chrome_vault.len() + self.firefox_vault.len()
+            count // ✅ trả về số mới import
         }
-        
+
         pub fn sync_to_vault(&self, vault: &mut Vec<VaultEntry>) {
             let mut all = vault.clone();
             all.extend(self.chrome_vault.clone());
@@ -321,19 +324,24 @@ mod state {
 // ======================
 mod net {
     use super::*;
+
+    // ✅ FIX #4: Không unwrap() trên Proxy::all — tránh panic nếu URL sai
     pub fn build_client(c: &state::TabConfig) -> reqwest::Client {
         let jar = Arc::new(reqwest::cookie::Jar::default());
         let mut b = reqwest::Client::builder()
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
             .cookie_provider(jar)
             .danger_accept_invalid_certs(false)
-            .local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
             .timeout(Duration::from_secs(30));
-        
-        if c.tor { b = b.proxy(reqwest::Proxy::all("socks5h://127.0.0.1:9050").unwrap()); }
-        else if c.warp { b = b.proxy(reqwest::Proxy::all("socks5h://127.0.0.1:2053").unwrap()); }
-        else if c.proxy { b = b.proxy(reqwest::Proxy::all(&c.proxy_url).unwrap()); }
-        
+
+        if c.tor {
+            if let Ok(p) = reqwest::Proxy::all("socks5h://127.0.0.1:9050") { b = b.proxy(p); }
+        } else if c.warp {
+            if let Ok(p) = reqwest::Proxy::all("socks5h://127.0.0.1:2053") { b = b.proxy(p); }
+        } else if c.proxy {
+            if let Ok(p) = reqwest::Proxy::all(&c.proxy_url) { b = b.proxy(p); }
+        }
+
         b.build().unwrap_or_else(|_| reqwest::Client::new())
     }
 }
@@ -353,19 +361,19 @@ mod sinkhole {
 // ======================
 mod injection {
     use super::*;
-    
+
     lazy_static::lazy_static! {
         static ref PAYLOAD_CACHE: StdMutex<HashMap<u64, String>> = StdMutex::new(HashMap::new());
     }
-    
+
     pub fn get_security_payload(cfg: &state::TabConfig) -> String {
         let hash = cfg_hash(cfg);
         if let Some(cached) = PAYLOAD_CACHE.lock().unwrap().get(&hash) { return cached.clone(); }
-        
+
         let (mut css, mut js) = (String::new(), String::new());
-        
-        if cfg.ad { 
-            css.push_str(r#"[class*="ad-"],[id*="ad-"],.adsbygoogle,#google_ads,iframe[src*="doubleclick"],[class*="sponsor"],[id*="banner"],.ad-container,.adsbox{display:none!important;height:0!important;width:0!important;overflow:hidden!important}"#); 
+
+        if cfg.ad {
+            css.push_str(r#"[class*="ad-"],[id*="ad-"],.adsbygoogle,#google_ads,iframe[src*="doubleclick"],[class*="sponsor"],[id*="banner"],.ad-container,.adsbox{display:none!important;height:0!important;width:0!important;overflow:hidden!important}"#);
             js.push_str(r#"
             if (window.location.hostname.includes('youtube.com')) {
                 setInterval(() => {
@@ -378,8 +386,8 @@ mod injection {
             }
             "#);
         }
-        
-        if cfg.trk { 
+
+        if cfg.trk {
             js.push_str(r#"
             !function(){
                 const trackers = ['analytics','segment.io','mixpanel','hotjar','facebook.com/tr','trackcmp'];
@@ -387,27 +395,26 @@ mod injection {
                     try { let s = typeof u === 'string' ? u : (u.url || u.href || ''); return trackers.some(t => s.includes(t)); } catch(e) { return false; }
                 };
                 const notify = () => { try { window.top.postMessage(JSON.stringify({a:'inc',p:''}),'*'); } catch(e) {} };
-                
+
                 const origFetch = window.fetch;
                 window.fetch = function(input, init) {
                     if (isTracker(input)) { notify(); return Promise.reject("Blocked"); }
                     return origFetch.apply(this, arguments);
                 };
-                
+
                 const origOpen = XMLHttpRequest.prototype.open;
                 XMLHttpRequest.prototype.open = function(method, url) {
                     if (isTracker(url)) { notify(); return; }
                     return origOpen.apply(this, arguments);
                 };
-                
+
                 navigator.sendBeacon = () => false;
             }();
-            "#); 
+            "#);
         }
-        
+
         if cfg.cookie { js.push_str(r#"!function(){const t=Object.getOwnPropertyDescriptor(Document.prototype,"cookie");t&&(Object.defineProperty(document,"cookie",{set(n){/(_ga|track|fbp)/.test(n)||t.set.call(this,n)},get(){return t.get.call(this)}}))}()"#); }
-        
-        // Fix Copilot Issue: Improved Anti-Fingerprint (WebGL2 + AudioContext)
+
         if cfg.anti_fp { js.push_str(r#"
         !function(){
             const fakeCanvas=()=>"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg==";
@@ -426,7 +433,7 @@ mod injection {
             Object.defineProperty(navigator,"platform",{get:()=>"Win32"});
         }()
         "#); }
-        
+
         js.push_str(r#"
         !function(){
             const t=()=>{
@@ -449,11 +456,9 @@ mod injection {
             const n=new MutationObserver(t);
             n.observe(document.body,{childList:!0,subtree:!0});
             t();
-            window.nexusGeneratePassword=()=>{const t="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";return Array.from(crypto.getRandomValues(new Uint8Array(16)),n=>t[n%t.length]).join("")};
+            window.nexusGeneratePassword=(len)=>{const t="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";return Array.from(crypto.getRandomValues(new Uint8Array(len||16)),n=>t[n%t.length]).join("")};
             window.nexusFillPassword=(t,n)=>{let o=null,e=null;for(const n of document.querySelectorAll("input"))"password"===n.type&&!e&&(e=n),(/text|email/.test(n.type)||/user|email/i.test(n.name))&&(o=n);o&&(o.value=t);e&&(e.value=n)};
 
-            // Fallback detection for SPA login UIs with no real <form>/submit event (very common
-            // in React/Vue: a <div> with a button whose onClick calls fetch()/axios directly).
             let lastSig = "";
             const guessUserField = (pwField) => {
                 const inputs = Array.from(document.querySelectorAll('input'));
@@ -484,7 +489,7 @@ mod injection {
                 if (pw && pw.value) maybeReport(pw);
             }, true);
         }();
-        
+
         document.addEventListener('click', function(e) {
             let a = e.target.closest('a');
             if (a && a.href && !a.href.startsWith('javascript:') && !a.href.startsWith('#')) {
@@ -498,8 +503,8 @@ mod injection {
                 }
             }
         }, true);
-        
-        // Fix Copilot Issue: POST requests broken -> Sử dụng fetch nội bộ để giữ nguyên multipart
+
+        // ✅ FIX #11: Giữ nguyên multipart/form-data (file upload) thay vì chỉ gửi key-value
         document.addEventListener('submit', function(e) {
             e.stopPropagation();
             e.stopImmediatePropagation();
@@ -508,30 +513,44 @@ mod injection {
             let method = (form.method || 'get').toLowerCase();
             let url = new URL(form.action || window.location.href);
             let formData = new FormData(form);
-            
+            let hasFiles = false;
+            for (let [key, value] of formData.entries()) {
+                if (value instanceof File) { hasFiles = true; break; }
+            }
+
             if (method === 'get') {
                 for (let [key, value] of formData.entries()) {
-                    url.searchParams.append(key, value);
+                    if (!(value instanceof File)) url.searchParams.append(key, value);
                 }
                 window.top.postMessage(JSON.stringify({a: 'nav-internal', p: url.href}), '*');
+            } else if (hasFiles) {
+                // ✅ File upload: dùng fetch trực tiếp trong iframe thay vì IPC
+                fetch(url.href, { method: 'POST', body: formData, credentials: 'include' })
+                    .then(r => r.text())
+                    .then(html => {
+                        window.top.postMessage(JSON.stringify({a: 'nav-internal', p: url.href}), '*');
+                    })
+                    .catch(() => {
+                        window.top.postMessage(JSON.stringify({a: 'nav-internal', p: url.href}), '*');
+                    });
             } else {
                 let body = {};
                 for (let [key, value] of formData.entries()) { body[key] = value; }
                 window.top.postMessage(JSON.stringify({a: 'nav-post', p: {url: url.href, body: body}}), '*');
             }
         }, true);
-        
+
         window.open = function(url) {
             window.top.postMessage(JSON.stringify({a: 'new-tab-url', p: url}), '*');
             return null;
         };
         "#);
-        
+
         let payload = format!(r#"<style id="nexus-shield-css">{}</style><script id="nexus-shield-js">{}</script>"#, css, js);
         PAYLOAD_CACHE.lock().unwrap().insert(hash, payload.clone());
         payload
     }
-    
+
     fn cfg_hash(cfg: &state::TabConfig) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -547,70 +566,69 @@ mod injection {
 mod vault {
     use super::*;
     use rand::seq::SliceRandom;
-    
+
     const VAULT_FILE: &str = "nexus_vault.dat";
     lazy_static::lazy_static! {
         static ref VAULT_LOCK: TokioMutex<()> = TokioMutex::new(());
     }
-    
+
     fn argon2() -> Argon2<'static> {
         let m_cost = if num_cpus::get() > 4 { 192 * 1024 } else { 128 * 1024 };
-        Argon2::new(argon2::Algorithm::Argon2id, Version::V0x13, 
+        Argon2::new(argon2::Algorithm::Argon2id, Version::V0x13,
             Params::new(m_cost, 3, std::cmp::min(4, num_cpus::get().try_into().unwrap_or(4)), None).unwrap())
     }
-    
+
     fn derive_key(master: &str, salt: &[u8]) -> Option<[u8; 32]> {
         let mut key = [0u8; 32];
         argon2().hash_password_into(master.as_bytes(), salt, &mut key).ok()?;
         Some(key)
     }
-    
+
+    // ✅ FIX #1: salt.decode_b64(&mut raw_salt) KHÔNG tồn tại → dùng b64_decode()
     pub fn encrypt(data: &str, master: &str) -> Option<(String, String, String)> {
         if master.is_empty() { return None; }
         let salt = SaltString::generate(rand::thread_rng());
-        let mut raw_salt = [0u8; 64];
-        let salt_bytes = salt.decode_b64(&mut raw_salt).ok()?;
-        let key = derive_key(master, salt_bytes)?;
+        let salt_bytes = salt.b64_decode().ok()?;          // ✅ FIX
+        let key = derive_key(master, &salt_bytes)?;         // ✅ FIX: &salt_bytes
         let cipher = Aes256Gcm::new_from_slice(&key).ok()?;
-        
+
         let mut nonce = [0u8; 12];
         rand::rngs::OsRng.try_fill_bytes(&mut nonce).ok()?;
-        
+
         let ciphertext = cipher.encrypt(Nonce::from_slice(&nonce), data.as_bytes()).ok()?;
-        
+
         Some((
             general_purpose::STANDARD.encode(&ciphertext),
             general_purpose::STANDARD.encode(nonce),
             salt.as_str().to_string(),
         ))
     }
-    
+
+    // ✅ FIX #2: Cùng lỗi decode_b64
     pub fn decrypt(enc: &str, nonce: &str, salt: &str, master: &str) -> Option<String> {
         let ciphertext = general_purpose::STANDARD.decode(enc).ok()?;
-        let nonce = general_purpose::STANDARD.decode(nonce).ok()?;
-        if nonce.len() != 12 { return None; }
-        
+        let nonce_bytes = general_purpose::STANDARD.decode(nonce).ok()?;
+        if nonce_bytes.len() != 12 { return None; }
+
         let salt_value = SaltString::from_b64(salt).ok()?;
-        let mut raw_salt = [0u8; 64];
-        let salt_bytes = salt_value.decode_b64(&mut raw_salt).ok()?;
-        
-        let key = derive_key(master, salt_bytes)?;
+        let salt_bytes = salt_value.b64_decode().ok()?;     // ✅ FIX
+        let key = derive_key(master, &salt_bytes)?;          // ✅ FIX: &salt_bytes
         let cipher = Aes256Gcm::new_from_slice(&key).ok()?;
-        String::from_utf8(cipher.decrypt(Nonce::from_slice(&nonce), ciphertext.as_slice()).ok()?).ok()
+        String::from_utf8(cipher.decrypt(Nonce::from_slice(&nonce_bytes), ciphertext.as_slice()).ok()?).ok()
     }
-    
+
     pub fn generate(len: usize) -> String {
         const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
         let mut rng = rand::thread_rng();
         (0..len).map(|_| *CHARSET.choose(&mut rng).unwrap() as char).collect()
     }
-    
+
     pub fn load() -> Vec<state::VaultEntry> {
         std::fs::read(VAULT_FILE).ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default()
     }
-    
+
     pub async fn save(entries: &[state::VaultEntry]) -> bool {
         let _guard = VAULT_LOCK.lock().await;
         let temp = format!("{}.tmp", VAULT_FILE);
@@ -636,31 +654,34 @@ mod sync {
 // ======================
 mod ai {
     use super::*;
-    
+
     pub async fn ask(prompt: String, st: Arc<RwLock<state::State>>) -> String {
         let (cfg, ai, mut history) = {
             let g = st.read().await;
             let t = g.active_tab();
             (t.cfg.clone(), t.ai.clone(), t.ai_mem.clone())
         };
-        
+
         if ai.endpoint.is_empty() || ai.key.is_empty() {
             return "⚠ AI not configured. Enter Endpoint + API Key + Model in the AI panel.".into();
         }
-        
+
         let client = {
             let mut g = st.write().await;
             let t = g.active_tab_mut();
             t.update_client();
             t.client.clone().unwrap_or_else(reqwest::Client::new)
         };
-        
+
         let model = if ai.model.is_empty() { "gpt-4o-mini" } else { &ai.model }.to_string();
-        history.push_back(("user".into(), prompt.clone())); // Đưa prompt vào history tạm thời
+        history.push_back(("user".into(), prompt.clone()));
+        // ✅ FIX #9: Trim history tạm thời nếu > 40
+        while history.len() > 40 { history.pop_front(); }
+
         let messages: Vec<JsonValue> = history.iter().map(|(r,c)| json!({"role":r,"content":c})).collect();
-        
+
         let body = json!({ "model": model, "messages": messages, "stream": false });
-        
+
         let reply = match client
             .post(&ai.endpoint)
             .bearer_auth(&ai.key)
@@ -677,8 +698,7 @@ mod ai {
             },
             Err(_) => "⚠ Invalid AI response.".into(),
         };
-        
-        // Lưu prompt thật sự vào memory
+
         {
             let mut g = st.write().await;
             let t = g.active_tab_mut();
@@ -694,9 +714,9 @@ mod ai {
 // ======================
 mod dl {
     use super::*;
-    
+
     const PARTS: usize = 16;
-    
+
     pub async fn turbo(url: String, st: Arc<RwLock<state::State>>) {
         let client = {
             let mut g = st.write().await;
@@ -704,39 +724,44 @@ mod dl {
             t.update_client();
             t.client.clone().unwrap_or_else(reqwest::Client::new)
         };
-        
+
         let (len, accept_ranges) = client.head(&url).send().await
             .ok()
-            .map(|r| (r.content_length().unwrap_or(0), 
+            .map(|r| (r.content_length().unwrap_or(0),
                 r.headers().get("accept-ranges").and_then(|v| v.to_str().ok()).map(|v| v.contains("bytes")).unwrap_or(false)))
             .unwrap_or((0, false));
-        
+
         let f_name = url.split('/').next_back().filter(|s| !s.is_empty()).unwrap_or("nxdl.bin").to_string();
         let f_name = format!("./{}", f_name);
-        
+
         if len == 0 || !accept_ranges {
             if let Ok(r) = client.get(&url).send().await {
                 if let Ok(b) = r.bytes().await { let _ = tokio::fs::write(&f_name, &b).await; }
             }
             return;
         }
-        
+
         let chunk = len.div_ceil(PARTS as u64);
         let file = match tokio::fs::OpenOptions::new().write(true).create(true).truncate(true).open(&f_name).await {
             Ok(f) => Arc::new(TokioMutex::new(f)),
             Err(_) => return,
         };
-        
+
+        // ✅ FIX #12: Dùng Semaphore permit guard để tránh leak permit
         let (sem, failed) = (Arc::new(Semaphore::new(PARTS)), Arc::new(AtomicUsize::new(0)));
         let mut set = JoinSet::new();
-        
+
         for i in 0..PARTS {
             let (client, url, sem, file, failed) = (client.clone(), url.clone(), sem.clone(), file.clone(), failed.clone());
             let (s, e) = (i as u64 * chunk, (i as u64 * chunk + chunk - 1).min(len - 1));
             if s > e { continue; }
-            
+
             set.spawn(async move {
-                if sem.acquire().await.is_err() { return; }
+                // ✅ FIX #12: Giữ permit guard sống đến hết scope → tự release khi drop
+                let _permit = match sem.acquire_owned().await {
+                    Ok(p) => p,
+                    Err(_) => return,
+                };
                 let response = client.get(&url).header("Range", format!("bytes={}-{}", s, e)).send().await;
                 if let Ok(response) = response {
                     if let Ok(bytes) = response.bytes().await {
@@ -746,7 +771,7 @@ mod dl {
                 } else { failed.fetch_add(1, Ordering::SeqCst); }
             });
         }
-        
+
         while set.join_next().await.is_some() {}
         if failed.load(Ordering::SeqCst) > 0 { let _ = tokio::fs::remove_file(&f_name).await; }
     }
@@ -779,10 +804,10 @@ mod extensions {
     use super::*;
     use std::path::PathBuf;
     use tokio::fs;
-    
+
     const EXTENSIONS_DIR: &str = "nexus_extensions";
     const MANIFEST_FILE: &str = "manifest.json";
-    
+
     #[derive(Debug, Clone, serde::Deserialize)]
     pub struct ExtensionManifest {
         pub name: String, pub version: String, pub description: String,
@@ -791,24 +816,24 @@ mod extensions {
         pub background: Option<BackgroundScript>,
         pub icons: Option<std::collections::HashMap<String, String>>,
     }
-    
+
     #[derive(Debug, Clone, serde::Deserialize)]
     pub struct ContentScript {
         pub matches: Vec<String>, pub js: Vec<String>,
         pub css: Option<Vec<String>>, pub run_at: Option<String>,
     }
-    
+
     #[derive(Debug, Clone, serde::Deserialize)]
     pub struct BackgroundScript {
         pub service_worker: Option<String>,
         pub scripts: Option<Vec<String>>,
     }
-    
+
     #[derive(Debug)]
     pub struct Extension {
         pub id: String, pub path: PathBuf, pub manifest: ExtensionManifest, pub enabled: bool,
     }
-    
+
     impl Extension {
         pub async fn load(id: &str) -> Result<Self, String> {
             let path = PathBuf::from(EXTENSIONS_DIR).join(id);
@@ -818,7 +843,7 @@ mod extensions {
             let enabled = !path.join("DISABLED").exists();
             Ok(Self { id: id.to_string(), path, manifest, enabled })
         }
-        
+
         pub async fn get_content_script_injection(&self, url: &str) -> Option<String> {
             if !self.enabled { return None; }
             let scripts = self.manifest.content_scripts.as_ref()?
@@ -826,9 +851,9 @@ mod extensions {
                 .filter(|cs| cs.matches.iter().any(|pattern| url_matches_pattern(url, pattern)))
                 .flat_map(|cs| cs.js.iter().map(|js| (js, cs.run_at.clone())))
                 .collect::<Vec<_>>();
-                
+
             if scripts.is_empty() { return None; }
-            
+
             let mut js_injection = String::new();
             for (js_file, run_at) in scripts {
                 let js_path = self.path.join(js_file);
@@ -847,7 +872,7 @@ mod extensions {
             }
             Some(js_injection)
         }
-        
+
         pub async fn get_css_injection(&self, url: &str) -> Option<String> {
             if !self.enabled { return None; }
             let css_files = self.manifest.content_scripts.as_ref()?
@@ -855,7 +880,7 @@ mod extensions {
                 .filter(|cs| cs.matches.iter().any(|pattern| url_matches_pattern(url, pattern)))
                 .flat_map(|cs| cs.css.as_deref().unwrap_or(&[]).iter())
                 .collect::<Vec<_>>();
-                
+
             if css_files.is_empty() { return None; }
             let mut css_injection = String::new();
             for css_file in css_files {
@@ -864,7 +889,7 @@ mod extensions {
             }
             Some(css_injection)
         }
-        
+
         pub async fn get_background_script(&self) -> Option<String> {
             if !self.enabled { return None; }
             let bg_script = match &self.manifest.background {
@@ -878,13 +903,15 @@ mod extensions {
             match bg_script { Some(path) => fs::read_to_string(&path).await.ok(), None => None }
         }
     }
-    
+
+    // ✅ FIX #8: Thêm anchors ^...$ để tránh false positive
     fn url_matches_pattern(url: &str, pattern: &str) -> bool {
         if pattern == "<all_urls>" { return true; }
-        let pattern = pattern.replace('.', r"\.").replace('*', ".*");
-        Regex::new(&pattern).map(|re| re.is_match(url)).unwrap_or(false)
+        let escaped = pattern.replace('.', r"\.").replace('*', ".*");
+        let anchored = format!("^{}$", escaped);
+        Regex::new(&anchored).map(|re| re.is_match(url)).unwrap_or(false)
     }
-    
+
     pub async fn load_all_extensions() -> Vec<Extension> {
         let mut extensions = Vec::new();
         if let Ok(entries) = fs::read_dir(EXTENSIONS_DIR).await {
@@ -898,7 +925,7 @@ mod extensions {
         }
         extensions
     }
-    
+
     pub async fn get_injections_for_url(url: &str, extensions: &[Extension]) -> (Option<String>, Option<String>) {
         let mut js_injections = Vec::new();
         let mut css_injections = Vec::new();
@@ -911,7 +938,7 @@ mod extensions {
             if css_injections.is_empty() { None } else { Some(css_injections.join("\n")) }
         )
     }
-    
+
     pub mod api {
         use super::*;
         pub fn setup_extension_apis(webview: &wry::WebView) {
@@ -936,11 +963,11 @@ mod extensions {
 // ======================
 mod autoconfig {
     use super::*;
-    
+
     pub async fn detect_warp() -> bool {
         tokio::net::TcpStream::connect("127.0.0.1:2053").await.is_ok()
     }
-    
+
     pub async fn detect_tor() -> bool {
         tokio::net::TcpStream::connect("127.0.0.1:9050").await.is_ok()
     }
@@ -1033,8 +1060,6 @@ iframe{width:100%;height:100%;border:none}
 input:checked+.slider{background:var(--acc)}
 input:checked+.slider:before{transform:translateX(16px)}
 
-/* Popover panels (History/Vault/AI/Extensions) anchored near the toolbar, not floating in
-   the middle of the screen disconnected from whatever icon triggered them. */
 .modal{position:fixed;top:54px;right:14px;width:340px;max-width:92vw;max-height:calc(100vh - 80px);
   overflow-y:auto;background:var(--panel);border:1px solid var(--brd);border-radius:12px;
   box-shadow:0 16px 40px rgba(0,0,0,.18);z-index:1001;padding:18px;
@@ -1260,7 +1285,6 @@ function initTheme() {
   applyTheme(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 }
 
-// Fix Bug: XSS Protection
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function escAttr(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
@@ -1339,7 +1363,7 @@ function aiAsk(){const q=v('ai-prompt');if(q){sr('ai',q);document.getElementById
 function addAi(t){document.getElementById('ai-log').innerHTML+=`<div style="margin:4px 0;padding:6px;background:var(--input);border-radius:4px">${t}</div>`}
 
 function showPassPopup(d) {
-  document.getElementById('suggest-domain').textContent = new URL(d.url).hostname;
+  try { document.getElementById('suggest-domain').textContent = new URL(d.url).hostname; } catch(e) { document.getElementById('suggest-domain').textContent = d.url; }
   document.getElementById('suggest-pass').textContent = '•'.repeat(d.password.length);
   window.passData = d;
   document.getElementById('pass-popup').style.display = 'block';
@@ -1352,9 +1376,12 @@ function savePassPopup() {
     hidePassPopup();
   }
 }
+// ✅ FIX #5: nexusGeneratePassword chỉ có trong iframe → tự generate trên main page
 function genPassPopup() {
   if (window.passData) {
-    const p = window.nexusGeneratePassword(16);
+    const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+    const arr = crypto.getRandomValues(new Uint8Array(16));
+    const p = Array.from(arr, n => charset[n % charset.length]).join('');
     document.getElementById('suggest-pass').textContent = p;
     window.passData.password = p;
     sr('fill-password', {url: window.passData.url, username: window.passData.username, password: p});
@@ -1374,7 +1401,7 @@ window.addEventListener('message',function(event) {
     else if (data.a === 'console-log') lg(data.p);
     else if (data.a === 'inc') sr('inc', '');
     else if (data.a === 'ext-list-response') renderExtensions(data.p);
-    else if (data.a === 'ext-toggle-response') { /* checkbox already reflects the click; list stays in sync on next open */ }
+    else if (data.a === 'ext-toggle-response') {}
   } catch (e) {}
 });
 
@@ -1425,11 +1452,11 @@ renderTabs();
 // ======================
 // RENDER PAGE
 // ======================
-// Fix Bug: Tối ưu UI speed, thay srcdoc bằng Blob URL để không block thread
+// ✅ FIX #7: Revoke Blob URL sau khi iframe load xong → tránh memory leak
 fn render_page(html_out: &str, url: &str, px: &tao::event_loop::EventLoopProxy<Ev>) {
     if let (Ok(h), Ok(u)) = (serde_json::to_string(html_out), serde_json::to_string(url)) {
         let _ = px.send_event(Ev::Js(format!(
-            "let w=document.getElementById('workspace');w.innerHTML='';let f=document.createElement('iframe');f.sandbox='allow-scripts allow-same-origin allow-forms allow-presentation allow-popups';f.style='width:100%;height:100%;border:none;background:var(--panel);';let b=new Blob([{0}],{{type:'text/html'}});f.src=URL.createObjectURL(b);w.appendChild(f);",
+            "let w=document.getElementById('workspace');w.innerHTML='';let f=document.createElement('iframe');f.sandbox='allow-scripts allow-same-origin allow-forms allow-presentation allow-popups';f.style='width:100%;height:100%;border:none;background:var(--panel);';let b=new Blob([{0}],{{type:'text/html'}});let blobUrl=URL.createObjectURL(b);f.onload=function(){{URL.revokeObjectURL(blobUrl)}};f.src=blobUrl;w.appendChild(f);",
             h
         )));
         let _ = px.send_event(Ev::Js(format!("document.getElementById('url-bar').value={};", u)));
@@ -1474,15 +1501,14 @@ async fn load_url_method(url: String, tab_idx: usize, method: &str, body: Option
         }
     };
     let load_started_safe = url.replace('\'', "\\'").replace('\n', " ");
-    
+
     if url != "nexus://home" {
         let proxy_note = if cfg.tor { " via Tor" } else if cfg.warp { " via WARP" } else { "" };
-        // Fix Bug: Xóa workspace cũ ngay lập tức để người dùng thấy bắt đầu load, và set URL bar ngay
         let _ = px.send_event(Ev::Js("let w=document.getElementById('workspace');w.innerHTML='<div style=\"display:flex;justify-content:center;align-items:center;height:100vh;background:var(--panel);color:var(--t3)\">Loading...</div>';".into()));
         let _ = px.send_event(Ev::Js(format!("document.getElementById('url-bar').value='{}';", url.replace('\'', "\\'").replace('\n', " "))));
         let _ = px.send_event(Ev::Js(format!("lg('→ loading {}{}'); showLoading();", load_started_safe, proxy_note)));
     }
-    
+
     if url == "nexus://home" {
         let home_html = r#"
         <!DOCTYPE html><html><head><style>
@@ -1520,7 +1546,7 @@ async fn load_url_method(url: String, tab_idx: usize, method: &str, body: Option
         let _ = px.send_event(Ev::Js(format!("lg('Total blocked: {}');", blocked)));
         return;
     }
-    
+
     let client = {
         let mut g = st.write().await;
         match g.tabs.get_mut(tab_idx) {
@@ -1528,11 +1554,11 @@ async fn load_url_method(url: String, tab_idx: usize, method: &str, body: Option
             None => return,
         }
     };
-    
+
     let secure_url = if url.starts_with("http://") && !url.contains("localhost") && !url.contains("127.0.0.1") {
         url.replace("http://", "https://")
     } else { url.clone() };
-    
+
     let clean_url = if let Ok(mut parsed_url) = Url::parse(&secure_url) {
         let mut query_pairs: Vec<(String, String)> = Vec::new();
         for (k, v) in parsed_url.query_pairs() {
@@ -1543,8 +1569,7 @@ async fn load_url_method(url: String, tab_idx: usize, method: &str, body: Option
         parsed_url.query_pairs_mut().clear().extend_pairs(query_pairs);
         parsed_url.to_string()
     } else { secure_url.clone() };
-    
-    // Sửa lỗi Compile: Tránh dùng reqwest::multipart (vì feature chưa bật). Dùng HashMap form thường.
+
     let req = if method == "POST" {
         let mut form = HashMap::new();
         if let Some(b) = body {
@@ -1559,7 +1584,7 @@ async fn load_url_method(url: String, tab_idx: usize, method: &str, body: Option
     } else {
         client.get(&clean_url)
     };
-    
+
     let t_start = std::time::Instant::now();
     let response = req
         .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
@@ -1582,7 +1607,7 @@ async fn load_url_method(url: String, tab_idx: usize, method: &str, body: Option
                 let safe_url = clean_url.replace('&', "&amp;").replace('"', "&quot;");
                 let shield = injection::get_security_payload(&cfg);
                 let inj = format!(r#"<base href="{}">{}"#, safe_url, shield);
-                
+
                 let lower_h = h.to_ascii_lowercase();
                 let mut html_out = if let Some(start) = lower_h.find("<head>") {
                     let pos = start + 6;
@@ -1591,7 +1616,7 @@ async fn load_url_method(url: String, tab_idx: usize, method: &str, body: Option
                     let pos = h[start..].find('>').map(|e| start + e + 1).unwrap_or(start);
                     format!("{}{}{}", &h[..pos], inj, &h[pos..])
                 } else { format!("{}{}", inj, h) };
-                
+
                 let extensions = extensions::load_all_extensions().await;
                 let (ext_js, ext_css) = extensions::get_injections_for_url(&clean_url, &extensions).await;
                 if ext_js.is_some() || ext_css.is_some() {
@@ -1621,7 +1646,7 @@ async fn load_url_method(url: String, tab_idx: usize, method: &str, body: Option
             tokio::spawn(dl::turbo(clean_url.clone(), st.clone()));
             return;
         }
-        
+
         if record {
             let mut g = st.write().await;
             if let Some(t) = g.tabs.get_mut(tab_idx) {
@@ -1634,22 +1659,19 @@ async fn load_url_method(url: String, tab_idx: usize, method: &str, body: Option
             let title = g.tabs.get(tab_idx).map(|t| t.name.clone()).unwrap_or_default();
             let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
             g.history.push(state::HistoryEntry { url: clean_url.clone(), title, time });
-            
-            let hist_data = g.history.clone();
-            
-            // Fix lỗi Clone TabState: Trích xuất mảng URL để save session
+
+            // ✅ FIX #10: Chỉ clone 1 lần thay vì 2
+            let hist_clone = g.history.clone();
             let st_urls: Vec<String> = g.tabs.iter().map(|t| t.url.clone()).collect();
             update_tabs(&g, px);
-            
-            let hist_clone = g.history.clone();
             drop(g);
-            
+
             tokio::spawn(async move {
                 state::save_history(&hist_clone).await;
                 state::save_session(&st_urls).await;
             });
 
-            if let Ok(hd) = serde_json::to_string(&hist_data) {
+            if let Ok(hd) = serde_json::to_string(&hist_clone) {
                 let _ = px.send_event(Ev::Js(format!(r#"if(window.renderHistory)window.renderHistory({})"#, hd)));
             }
         }
@@ -1673,20 +1695,18 @@ async fn load_url_method(url: String, tab_idx: usize, method: &str, body: Option
 
 // ======================
 // UPDATE TABS
+// ✅ FIX #3: Bỏ tokio::spawn bên trong — caller tự lo việc save async
 // ======================
 fn update_tabs(state: &state::State, px: &tao::event_loop::EventLoopProxy<Ev>) {
     let tabs = state.tabs.iter().map(|t| json!({
         "id": t.id, "name": t.name, "url": t.url, "frozen": t.frozen,
         "mode": match t.mode { state::TabMode::Normal => "normal", state::TabMode::Incognito => "incognito", state::TabMode::Tor => "tor" }
     })).collect::<Vec<_>>();
-    
+
     if let Ok(t) = serde_json::to_string(&tabs) {
         let _ = px.send_event(Ev::Js(format!(r#"if(window.updateTabs)window.updateTabs({{"tabs":{},"activeTab":{}}})"#, t, state.active_tab)));
     }
-
-    // Fix lỗi Clone TabState: Trích xuất mảng URL
-    let st_urls: Vec<String> = state.tabs.iter().map(|t| t.url.clone()).collect();
-    tokio::spawn(async move { state::save_session(&st_urls).await; });
+    // ✅ Không gọi tokio::spawn ở đây nữa — tránh panic khi gọi từ sync context
 }
 
 // ======================
@@ -1695,16 +1715,16 @@ fn update_tabs(state: &state::State, px: &tao::event_loop::EventLoopProxy<Ev>) {
 fn main() {
     dotenvy::dotenv().ok();
     std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
-    
+
     let el = EventLoopBuilder::<Ev>::with_user_event().build();
     let w = WindowBuilder::new()
         .with_title("Nexus Browser")
         .with_inner_size(LogicalSize::new(1200, 800))
         .build(&el).unwrap();
-    
+
     let mut initial = state::State::new();
     initial.vault = vault::load();
-    
+
     let saved_tabs = state::load_session();
     if !saved_tabs.is_empty() {
         initial.tabs.clear();
@@ -1719,16 +1739,16 @@ fn main() {
 
     let st = Arc::new(RwLock::new(initial));
     let px = el.create_proxy();
-    
+
     let rt = Builder::new_multi_thread()
         .worker_threads(std::cmp::max(2, num_cpus::get() - 1))
         .thread_stack_size(2 * 1024 * 1024)
         .enable_all().build().unwrap();
-    
+
     let handle = rt.handle().clone();
     let handle_for_loop = handle.clone();
     let (ist, ipx) = (st.clone(), px.clone());
-    
+
     let freeze_st = st.clone();
     let freeze_px = px.clone();
     rt.spawn(async move {
@@ -1741,20 +1761,25 @@ fn main() {
             for (i, tab) in g.tabs.iter_mut().enumerate() {
                 if i != active_idx && !tab.frozen && tab.last_active.elapsed() > Duration::from_secs(300) {
                     tab.frozen = true;
-                    tab.client = None; // Free network resources
+                    tab.client = None;
                     changed = true;
                 }
             }
-            if changed { update_tabs(&g, &freeze_px); }
+            if changed {
+                update_tabs(&g, &freeze_px);
+                // ✅ Save session từ async context (an toàn)
+                let st_urls: Vec<String> = g.tabs.iter().map(|t| t.url.clone()).collect();
+                tokio::spawn(async move { state::save_session(&st_urls).await; });
+            }
         }
     });
-    
-    let bm_init = st.clone().blocking_read().bookmarks.clone();
+
+    let bm_init = st.blocking_read().bookmarks.clone();
     if let Ok(b) = serde_json::to_string(&bm_init) {
         let _ = px.send_event(Ev::Js(format!(r#"if(window.renderBookmarks)window.renderBookmarks({})"#, b)));
     }
 
-    let hist_init = st.clone().blocking_read().history.clone();
+    let hist_init = st.blocking_read().history.clone();
     if let Ok(h) = serde_json::to_string(&hist_init) {
         let _ = px.send_event(Ev::Js(format!(r#"if(window.renderHistory)window.renderHistory({})"#, h)));
     }
@@ -1770,7 +1795,7 @@ fn main() {
             let (ist, ipx, handle) = (ist.clone(), ipx.clone(), handle.clone());
             let p: JsonValue = match serde_json::from_str(&msg) { Ok(v) => v, Err(_) => return };
             let (a, d) = (p["a"].as_str().unwrap_or("").to_string(), p["p"].clone());
-            
+
             handle.spawn(async move {
                 match a.as_str() {
                     "nav" | "nav-internal" => if let Some(u) = d.as_str().map(search::resolve) {
@@ -1797,22 +1822,21 @@ fn main() {
                         ipx.send_event(Ev::Js(format!("lg('{}');", safe_msg))).ok();
                     }
                     "bookmark" => if let Some(url) = d.as_str() {
-                        if url.is_empty() || url == "nexus://home" { 
+                        if url.is_empty() || url == "nexus://home" {
                             ipx.send_event(Ev::Js("lg('Cannot save this page');".into())).ok();
-                            return; 
+                            return;
                         }
                         let mut g = ist.write().await;
                         let title = g.active_tab().name.clone();
                         g.bookmarks.push(state::Bookmark { title, url: url.to_string() });
                         let bms = g.bookmarks.clone();
                         drop(g);
-                        
-                        // Fix lỗi borrow after move: Serialize trước khi spawn
+
                         if let Ok(b) = serde_json::to_string(&bms) {
                             ipx.send_event(Ev::Js(format!(r#"if(window.renderBookmarks)window.renderBookmarks({})"#, b))).ok();
                         }
                         tokio::spawn(async move { state::save_bookmarks(&bms).await; });
-                        
+
                         ipx.send_event(Ev::Js("lg('Saved to bookmarks');".into())).ok();
                     }
                     "back" => { let mut g = ist.write().await; let idx = g.active_tab; if let Some(u) = g.active_tab_mut().go_back() { drop(g); load_url(u, idx, ist.clone(), &ipx, false).await; } }
@@ -1885,7 +1909,7 @@ fn main() {
                         let mut g = ist.write().await;
                         g.switch_tab(idx);
                         if let Some(tab) = g.tabs.get_mut(idx) {
-                            tab.frozen = false; // Fix Copilot Issue: Unfreeze instantly on switch
+                            tab.frozen = false;
                             tab.last_active = Instant::now();
                         }
                         update_tabs(&g, &ipx);
@@ -1928,7 +1952,6 @@ fn main() {
                             let domain = if let Ok(parsed) = Url::parse(url) { parsed.domain().map(|d| d.to_string()).unwrap_or_else(|| url.to_string()) } else { url.split('/').next().unwrap_or(url).to_string() };
                             let mut g = ist.write().await;
                             if let Some(entry) = g.vault.iter_mut().find(|e| e.domain == domain && e.user == user) {
-                                // Fix Copilot Issue: Encrypt password on update instead of plaintext
                                 if let Some((enc, nonce, salt)) = vault::encrypt(pass, master) {
                                     entry.pass = enc;
                                     entry.nonce = nonce;
@@ -1985,11 +2008,11 @@ fn main() {
                 }
             });
         });
-    
+
     let wv = wb.build(&w).unwrap();
-    
+
     extensions::api::setup_extension_apis(&wv);
-    
+
     let px_clone = px.clone();
     let st_detect = st.clone();
     rt.spawn(async move {
@@ -2007,21 +2030,21 @@ fn main() {
             warp_detected && !tor_detected, tor_detected
         )));
     });
-    
+
     update_tabs(&st.blocking_read(), &px);
-    
+
     el.run(move |ev, _, cf| {
         *cf = ControlFlow::Wait;
         match ev {
             Event::NewEvents(StartCause::Init) => {
                 px.send_event(Ev::Js("lg('Nexus Core initialized');".into())).ok();
-                handle_for_loop.spawn({ 
-                    let (st, px) = (st.clone(), px.clone()); 
-                    async move { 
+                handle_for_loop.spawn({
+                    let (st, px) = (st.clone(), px.clone());
+                    async move {
                         let st_read = st.read().await;
                         let first_url = st_read.tabs[0].url.clone();
                         drop(st_read);
-                        load_url(first_url, 0, st, &px, false).await; 
+                        load_url(first_url, 0, st, &px, false).await;
                     }
                 });
             }
@@ -2030,11 +2053,11 @@ fn main() {
             }
             Event::UserEvent(Ev::NewTab(idx)) => {
                 update_tabs(&st.blocking_read(), &px);
-                handle_for_loop.spawn({ 
-                    let (st, px) = (st.clone(), px.clone()); 
-                    async move { 
-                        load_url("nexus://home".into(), idx, st, &px, false).await; 
-                    } 
+                handle_for_loop.spawn({
+                    let (st, px) = (st.clone(), px.clone());
+                    async move {
+                        load_url("nexus://home".into(), idx, st, &px, false).await;
+                    }
                 });
             }
             Event::UserEvent(Ev::CloseTab(_)) => {
