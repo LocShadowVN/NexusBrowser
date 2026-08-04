@@ -172,6 +172,9 @@ mod state {
             }
         }
 
+        // ✅ FIX #13: Bỏ `cookie` khỏi hash — build_client() không đọc field này,
+        // nên trước đây mỗi lần bật/tắt Cookie Shield sẽ vô tình tạo lại
+        // reqwest::Client với cookie jar RỖNG, làm mất session đăng nhập của tab.
         fn cfg_hash(&self) -> u64 {
             use std::hash::{Hash, Hasher};
             let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -179,7 +182,6 @@ mod state {
             self.cfg.proxy_url.hash(&mut h);
             self.cfg.tor.hash(&mut h);
             self.cfg.warp.hash(&mut h);
-            self.cfg.cookie.hash(&mut h);
             h.finish()
         }
     }
@@ -254,6 +256,7 @@ mod state {
         pub config: SyncConfig,
         pub chrome_vault: Vec<VaultEntry>,
         pub firefox_vault: Vec<VaultEntry>,
+        pub edge_vault: Vec<VaultEntry>, // ✅ FIX #14: tách riêng khỏi chrome_vault
     }
 
     impl SyncState {
@@ -268,10 +271,13 @@ mod state {
 
             let count = entries.len(); // ✅ lưu trước khi move
 
+            // ✅ FIX #14: trước đây nhánh "edge" ghi vào chrome_vault, nên lần
+            // sync Chrome kế tiếp (self.chrome_vault = entries) sẽ xoá sạch
+            // dữ liệu Edge vừa gộp. Giờ mỗi nguồn có chỗ chứa riêng.
             match browser {
                 "chrome" => self.chrome_vault = entries,
                 "firefox" => self.firefox_vault = entries,
-                "edge" => self.chrome_vault.extend(entries),
+                "edge" => self.edge_vault = entries,
                 _ => {}
             }
             count // ✅ trả về số mới import
@@ -281,6 +287,7 @@ mod state {
             let mut all = vault.clone();
             all.extend(self.chrome_vault.clone());
             all.extend(self.firefox_vault.clone());
+            all.extend(self.edge_vault.clone());
             all.sort_by(|a, b| a.domain.cmp(&b.domain));
             all.dedup_by(|a, b| a.domain == b.domain && a.user == b.user);
             *vault = all;
@@ -436,26 +443,6 @@ mod injection {
 
         js.push_str(r#"
         !function(){
-            const t=()=>{
-                document.querySelectorAll("form").forEach(n=>{
-                    if(!n.dataset.nexusMonitored){
-                        let o=!1,e=!1,r=null,s=null;
-                        n.querySelectorAll("input").forEach(t=>{
-                            "password"===t.type&&(e=!0,s=t);
-                            (/text|email/.test(t.type)||/user|email/i.test(t.name))&&(o=!0,r=t);
-                        });
-                        if(o&&e){
-                            n.dataset.nexusMonitored="true";
-                            n.addEventListener("submit",function(t){
-                                window.top.postMessage(JSON.stringify({a:"password-detected",p:{url:window.location.href,username:r?r.value:"",password:s?s.value:""}}),'*');
-                            });
-                        }
-                    }
-                });
-            };
-            const n=new MutationObserver(t);
-            n.observe(document.body,{childList:!0,subtree:!0});
-            t();
             window.nexusGeneratePassword=(len)=>{const t="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";return Array.from(crypto.getRandomValues(new Uint8Array(len||16)),n=>t[n%t.length]).join("")};
             window.nexusFillPassword=(t,n)=>{let o=null,e=null;for(const n of document.querySelectorAll("input"))"password"===n.type&&!e&&(e=n),(/text|email/.test(n.type)||/user|email/i.test(n.name))&&(o=n);o&&(o.value=t);e&&(e.value=n)};
 
@@ -469,7 +456,9 @@ mod injection {
                 }
                 return inputs.find(el => el !== pwField && (/text|email/.test(el.type) || /user|email|login/i.test(el.name || el.id || ''))) || null;
             };
-            const maybeReport = (pwField) => {
+            // ✅ FIX #19: expose ra window để listener 'submit' thật (bên dưới) gọi lại được —
+            // đây là tín hiệu đáng tin cậy nhất khi form submit chuẩn, thay vì chỉ đoán qua Enter/click.
+            window.__nexusReportPassword = (pwField) => {
                 if (!pwField || !pwField.value) return;
                 const userField = guessUserField(pwField);
                 const sig = window.location.href + '|' + (userField ? userField.value : '') + '|' + pwField.value;
@@ -478,7 +467,7 @@ mod injection {
                 window.top.postMessage(JSON.stringify({a:"password-detected",p:{url:window.location.href,username:userField?userField.value:"",password:pwField.value}}),'*');
             };
             document.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter' && e.target && e.target.type === 'password') maybeReport(e.target);
+                if (e.key === 'Enter' && e.target && e.target.type === 'password') window.__nexusReportPassword(e.target);
             }, true);
             document.addEventListener('click', function(e) {
                 const btn = e.target.closest('button, input[type="submit"], [role="button"], a');
@@ -486,7 +475,7 @@ mod injection {
                 const label = (btn.textContent || btn.value || '').trim();
                 if (!/log\s*in|sign\s*in|submit|continue|next/i.test(label) && btn.type !== 'submit') return;
                 const pw = document.querySelector('input[type="password"]');
-                if (pw && pw.value) maybeReport(pw);
+                if (pw && pw.value) window.__nexusReportPassword(pw);
             }, true);
         }();
 
@@ -510,6 +499,8 @@ mod injection {
             e.stopImmediatePropagation();
             e.preventDefault();
             let form = e.target;
+            const pwField = form.querySelector && form.querySelector('input[type="password"]');
+            if (pwField && window.__nexusReportPassword) window.__nexusReportPassword(pwField);
             let method = (form.method || 'get').toLowerCase();
             let url = new URL(form.action || window.location.href);
             let formData = new FormData(form);
@@ -986,14 +977,21 @@ fn html() -> String {
 html,body{transition:background-color .2s ease,color .2s ease}
 body{background:var(--bg);color:var(--t1);height:100vh;display:flex;flex-direction:column;overflow:hidden}
 #app{display:flex;flex-direction:column;height:100vh}
+/* scrollbar mảnh, đồng bộ theme thay vì scrollbar mặc định to thô của OS */
+*::-webkit-scrollbar{width:8px;height:8px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:var(--brd);border-radius:8px}
+*::-webkit-scrollbar-thumb:hover{background:var(--t3)}
 
 #tabs-bar{display:flex;align-items:center;height:42px;padding:6px 8px 0;background:var(--bg);gap:2px;z-index:10}
 .tab{display:flex;align-items:center;max-width:220px;min-width:140px;height:34px;padding:0 8px 0 14px;
   border-radius:10px 10px 0 0;background:transparent;color:var(--t2);cursor:pointer;white-space:nowrap;
   overflow:hidden;transition:background .15s ease;position:relative}
 .tab:hover{background:color-mix(in srgb, var(--t1) 6%, transparent)}
-.tab.active{background:var(--panel);color:var(--t1);box-shadow:0 -1px 0 var(--panel)}
+.tab.active{background:var(--panel);color:var(--t1)}
+.tab.active::after{content:"";position:absolute;left:8px;right:8px;top:0;height:2px;border-radius:0 0 2px 2px;background:var(--acc)}
 .tab.frozen .tab-title{opacity:.55}
+.tab-favicon{width:16px;height:16px;border-radius:5px;flex-shrink:0;margin-right:8px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--on-acc);background:var(--acc);text-transform:uppercase}
 .tab-title{flex:1;overflow:hidden;text-overflow:ellipsis;margin-right:6px;font-size:12.5px;font-weight:500}
 .tab-close{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:22px;height:22px;
   border-radius:50%;color:var(--t3);opacity:0;transition:opacity .15s,background .15s}
@@ -1063,10 +1061,12 @@ input:checked+.slider:before{transform:translateX(16px)}
 .modal{position:fixed;top:54px;right:14px;width:340px;max-width:92vw;max-height:calc(100vh - 80px);
   overflow-y:auto;background:var(--panel);border:1px solid var(--brd);border-radius:12px;
   box-shadow:0 16px 40px rgba(0,0,0,.18);z-index:1001;padding:18px;
-  visibility:hidden;opacity:0;transform:scale(.96) translateY(-6px);transform-origin:top right;
+  visibility:hidden;opacity:0;transform:scale(.96) translateY(-6px);transform-origin:top center;
   transition:opacity .16s ease,transform .16s ease,visibility 0s linear .16s}
 .modal.show{visibility:visible;opacity:1;transform:scale(1) translateY(0);transition:opacity .16s ease,transform .16s ease}
-.modal::before{content:"";position:absolute;top:-6px;right:22px;width:12px;height:12px;
+/* ✅ FIX #17: right dùng làm mặc định; JS (positionModal) sẽ set left/right + --arrow-x
+   theo đúng nút vừa bấm, để mũi tên luôn trỏ đúng vào nút mở modal đó */
+.modal::before{content:"";position:absolute;top:-6px;right:var(--arrow-x,22px);width:12px;height:12px;
   background:var(--panel);border-left:1px solid var(--brd);border-top:1px solid var(--brd);
   transform:rotate(45deg);border-radius:2px 0 0 0}
 .modal-title{font-size:16px;font-weight:700;margin-bottom:14px;color:var(--t1)}
@@ -1077,11 +1077,15 @@ input:checked+.slider:before{transform:translateX(16px)}
 .modal-btn.primary{background:var(--acc);color:var(--on-acc);border-color:var(--acc)}
 .modal-btn.primary:hover{background:var(--acc-hover)}
 
-#dev-console{position:fixed;bottom:0;right:0;width:400px;height:200px;background:rgba(0,0,0,0.8);color:#0f0;border-radius:8px 0 0 0;padding:10px;font-size:12px;z-index:999;display:none;overflow-y:auto}
+#dev-console{position:fixed;bottom:14px;right:14px;width:420px;height:220px;background:var(--panel);color:var(--t2);border:1px solid var(--brd);border-radius:10px;padding:12px;font-size:11.5px;font-family:"SF Mono",Consolas,Menlo,monospace;z-index:999;display:none;overflow-y:auto;box-shadow:0 16px 40px rgba(0,0,0,.18)}
 #dev-console.show{display:block}
-.log-entry{margin-bottom:4px;word-break:break-all}
+.log-entry{margin-bottom:5px;padding-bottom:5px;word-break:break-all;color:var(--t1);border-bottom:1px solid var(--brd)}
+.log-entry:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
 
-#pass-popup{position:fixed;bottom:20px;right:20px;width:320px;background:var(--panel);border:1px solid var(--brd);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:1002;padding:16px;display:none}
+#pass-popup{position:fixed;bottom:20px;right:20px;width:320px;background:var(--panel);border:1px solid var(--brd);border-radius:12px;box-shadow:0 16px 40px rgba(0,0,0,.18);z-index:1002;padding:16px;
+  visibility:hidden;opacity:0;transform:translateY(14px) scale(.98);transform-origin:bottom right;
+  transition:opacity .18s ease,transform .18s ease,visibility 0s linear .18s}
+#pass-popup.show{visibility:visible;opacity:1;transform:translateY(0) scale(1);transition:opacity .18s ease,transform .18s ease}
 .popup-header{display:flex;justify-content:space-between;margin-bottom:12px}
 .popup-title{font-weight:600;font-size:14px}
 .popup-close{cursor:pointer;color:var(--t3);font-size:18px}
@@ -1113,20 +1117,20 @@ input:checked+.slider:before{transform:translateX(16px)}
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 3.5v5.5c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V5.5L12 2z"/></svg>
       </span>
       <input type="text" id="url-bar" data-i18n-placeholder="url_ph" placeholder="Search or type URL" onkeydown="if(event.key==='Enter')sr('nav',this.value)">
-      <button class="url-star" id="star-btn" onclick="sr('bookmark', v('url-bar'))" data-i18n-title="bookmark" title="Bookmark">
+      <button class="url-star" id="star-btn" onclick="sr('bookmark', (tabs[activeTab]&&tabs[activeTab].url)||'')" data-i18n-title="bookmark" title="Bookmark">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14l-5-4.87 6.91-1.01L12 2z"/></svg>
       </button>
     </div>
-    <button class="tool-btn" onclick="toggleModal('history-modal')" data-i18n-title="history" title="History (Ctrl+H)">
+    <button class="tool-btn" onclick="toggleModal('history-modal',this)" data-i18n-title="history" title="History (Ctrl+H)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
     </button>
-    <button class="tool-btn" onclick="toggleModal('vault')" data-i18n-title="vault" title="Vault">
+    <button class="tool-btn" onclick="toggleModal('vault',this)" data-i18n-title="vault" title="Vault">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
     </button>
-    <button class="tool-btn" onclick="toggleModal('ai-modal')" data-i18n-title="ai" title="AI Assistant">
+    <button class="tool-btn" onclick="toggleModal('ai-modal',this)" data-i18n-title="ai" title="AI Assistant">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 5.3L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.7L12 3z"/><path d="M19 3.5l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5z"/></svg>
     </button>
-    <button class="tool-btn" onclick="openExtensions()" data-i18n-title="extensions" title="Extensions">
+    <button class="tool-btn" onclick="openExtensions(this)" data-i18n-title="extensions" title="Extensions">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
     </button>
     <button class="tool-btn" onclick="toggleTheme()" id="theme-btn" data-i18n-title="theme" title="Toggle theme (Ctrl+Shift+L)">
@@ -1216,7 +1220,7 @@ input:checked+.slider:before{transform:translateX(16px)}
     <div class="popup-pass" id="suggest-pass"></div>
     <div class="popup-actions">
       <button class="popup-btn primary" onclick="savePassPopup()" data-i18n="save">Save</button>
-      <button class="popup-btn" onclick="genPassPopup()" data-i18n="gen_new">Generate New</button>
+      <button class="popup-btn" id="gen-pass-btn" onclick="genPassPopup()" data-i18n="gen_new">Generate New</button>
     </div>
   </div>
 </div>
@@ -1288,11 +1292,16 @@ function initTheme() {
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function escAttr(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
+function tabLetter(name) {
+  const c = String(name || '?').trim().replace(/^https?:\/\//, '').charAt(0);
+  return c ? c.toUpperCase() : '?';
+}
 function renderTabs() {
   const closeIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
   document.getElementById('tabs-bar').innerHTML = tabs.map((t,i)=>`
     <div class="tab ${i===activeTab?'active':''} ${t.frozen?'frozen':''}" onclick="switchTab(${i})">
-      <span class="tab-title">${t.frozen?'❄ ':''}${escHtml(t.name)}</span>
+      <span class="tab-favicon">${t.frozen?'❄':escHtml(tabLetter(t.name))}</span>
+      <span class="tab-title">${escHtml(t.name)}</span>
       <span class="tab-close" onclick="closeTab(${i},event)">${closeIcon}</span>
     </div>`).join('')
     + `<div id="new-tab-btn" onclick="newTab('normal')" title="New Tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>`
@@ -1302,13 +1311,23 @@ function newTab(m) { sr('new-tab',m); }
 function closeTab(i,e) { e.stopPropagation(); if(tabs.length>1) sr('close-tab',i); }
 function switchTab(i) { sr('switch-tab',i); }
 
+let bookmarksList = [];
+// ✅ FIX #18: .url-star.saved đã có CSS sẵn nhưng chưa bao giờ được bật —
+// nút bookmark giờ sẽ tô vàng khi trang hiện tại đã có trong danh sách lưu.
+function updateStarState() {
+  const cur = (tabs[activeTab] && tabs[activeTab].url) || '';
+  const star = document.getElementById('star-btn');
+  if (star) star.classList.toggle('saved', bookmarksList.some(b => b.url === cur));
+}
 function renderBookmarks(bms) {
+  bookmarksList = bms || [];
   const bar = document.getElementById('bookmarks-bar');
   if(!bms || bms.length === 0) {
     bar.innerHTML = `<div class="bm-empty" data-i18n="empty_bm" style="color:var(--t3);font-size:13px;padding:4px 10px;">${i18n[lang].empty_bm}</div>`;
-    return;
+  } else {
+    bar.innerHTML = bms.map(b => `<div class="bm-item" onclick="sr('nav','${escAttr(b.url)}')">${escHtml(b.title)}</div>`).join('');
   }
-  bar.innerHTML = bms.map(b => `<div class="bm-item" onclick="sr('nav','${escAttr(b.url)}')">${escHtml(b.title)}</div>`).join('');
+  updateStarState();
 }
 
 function renderHistory(hist) {
@@ -1320,7 +1339,7 @@ function renderHistory(hist) {
   list.innerHTML = hist.slice().reverse().map(h => `<div class="history-item" onclick="sr('nav','${escAttr(h.url)}');toggleModal('history-modal')">${escHtml(h.title)} <span style="color:var(--t3);font-size:11px;">(${new Date(h.time*1000).toLocaleString()})</span></div>`).join('');
 }
 
-function openExtensions(){ sr('ext-list'); toggleModal('ext-modal'); }
+function openExtensions(btn){ sr('ext-list'); toggleModal('ext-modal', btn); }
 function renderExtensions(list){
   const c = document.getElementById('ext-list');
   if(!list || list.length===0){ c.innerHTML = `<p style="color:var(--t2)">${i18n[lang].no_ext}</p>`; return; }
@@ -1342,10 +1361,24 @@ function hideLoading(){ const b=document.getElementById('load-bar'); b.style.wid
 function sr(a,p){window.ipc&&window.ipc.postMessage(JSON.stringify({a,p}))}
 function ts(k,v){sr('shld',{s:k,v:v})}
 function v(id){return document.getElementById(id).value}
-function toggleModal(id){
+// ✅ FIX #17: định vị modal ngay dưới nút vừa bấm, kẹp trong viewport,
+// và đặt --arrow-x để mũi tên trỏ đúng vào giữa nút đó.
+function positionModal(modal, btn) {
+  if (!btn) { modal.style.left = ''; modal.style.right = '14px'; modal.style.removeProperty('--arrow-x'); return; }
+  const r = btn.getBoundingClientRect();
+  const mw = modal.offsetWidth || 340;
+  let left = Math.round(r.left + r.width / 2 - mw / 2);
+  left = Math.max(10, Math.min(left, window.innerWidth - mw - 10));
+  modal.style.left = left + 'px';
+  modal.style.right = 'auto';
+  const arrowFromRight = (left + mw) - (r.left + r.width / 2) - 6;
+  modal.style.setProperty('--arrow-x', Math.max(14, Math.min(arrowFromRight, mw - 34)) + 'px');
+}
+function toggleModal(id, btn){
   const target = document.getElementById(id);
   const willOpen = !target.classList.contains('show');
   document.querySelectorAll('.modal.show').forEach(m => { if (m.id !== id) m.classList.remove('show'); });
+  if (willOpen) positionModal(target, btn);
   target.classList.toggle('show', willOpen);
 }
 document.addEventListener('click', function(e) {
@@ -1356,7 +1389,13 @@ document.addEventListener('click', function(e) {
 }, true);
 function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open')}
 function lg(m,t){const c=document.getElementById('dev-console');c.innerHTML=`<div class="log-entry">[${new Date().toLocaleTimeString()}] ${m}</div>`+c.innerHTML}
-function vAct(a){sr('vault',{a,m:v('v-master'),d:v('v-domain'),u:v('v-user'),p:v('v-pass')})}
+// ✅ FIX #21: currentMasterPass trước đây không bao giờ được gán -> popup lưu
+// mật khẩu nhanh luôn báo "chưa nhập Master Password" dù đã nhập trong Vault.
+function vAct(a){
+  const m = v('v-master');
+  if (m) currentMasterPass = m;
+  sr('vault',{a,m,d:v('v-domain'),u:v('v-user'),p:v('v-pass')});
+}
 function vRes(t){document.getElementById('v-res').textContent=t}
 function aiCfg(){sr('ai_cfg',{e:v('ai-endpoint'),k:v('ai-key'),m:v('ai-model')})}
 function aiAsk(){const q=v('ai-prompt');if(q){sr('ai',q);document.getElementById('ai-prompt').value=''}}
@@ -1365,10 +1404,12 @@ function addAi(t){document.getElementById('ai-log').innerHTML+=`<div style="marg
 function showPassPopup(d) {
   try { document.getElementById('suggest-domain').textContent = new URL(d.url).hostname; } catch(e) { document.getElementById('suggest-domain').textContent = d.url; }
   document.getElementById('suggest-pass').textContent = '•'.repeat(d.password.length);
+  // ✅ FIX #16: setting "Password Suggest" giờ thực sự điều khiển nút này
+  document.getElementById('gen-pass-btn').style.display = d.suggest === false ? 'none' : '';
   window.passData = d;
-  document.getElementById('pass-popup').style.display = 'block';
+  document.getElementById('pass-popup').classList.add('show');
 }
-function hidePassPopup() { document.getElementById('pass-popup').style.display = 'none'; }
+function hidePassPopup() { document.getElementById('pass-popup').classList.remove('show'); }
 function savePassPopup() {
   if (window.passData) {
     if (!currentMasterPass) { alert(i18n[lang].master_req); toggleModal('vault'); return; }
@@ -1409,13 +1450,14 @@ window.updateTabs = function(d) {
   tabs = d.tabs; activeTab = d.activeTab; renderTabs();
   let url = tabs[activeTab].url;
   document.getElementById('url-bar').value = url === 'nexus://home' ? '' : url;
+  updateStarState();
 }
 
 function closeTopmostOverlay() {
   const openModal = document.querySelector('.modal.show');
   if (openModal) { openModal.classList.remove('show'); return true; }
   if (document.getElementById('sidebar').classList.contains('open')) { toggleSidebar(); return true; }
-  if (document.getElementById('pass-popup').style.display === 'block') { hidePassPopup(); return true; }
+  if (document.getElementById('pass-popup').classList.contains('show')) { hidePassPopup(); return true; }
   if (document.getElementById('dev-console').classList.contains('show')) { document.getElementById('dev-console').classList.remove('show'); return true; }
   return false;
 }
@@ -1511,18 +1553,42 @@ async fn load_url_method(url: String, tab_idx: usize, method: &str, body: Option
 
     if url == "nexus://home" {
         let home_html = r#"
-        <!DOCTYPE html><html><head><style>
-        body { background: #fff; color: #202124; font-family: -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-        h1 { font-size: 4rem; color: #1a73e8; margin-bottom: 10px; font-weight: 300; }
-        .search { width: 60%; max-width: 600px; padding: 14px 24px; border-radius: 24px; border: 1px solid #dadce0; box-shadow: 0 1px 6px rgba(32,33,36,0.28); font-size: 16px; outline: none; background: #fff; color: #202124; }
-        .search:focus { border-color: #1a73e8; }
-        @media (prefers-color-scheme: dark) {
-            body { background: #1a1a1e; color: #e8eaed; }
-            .search { background: #2f2f35; color: #e8eaed; border-color: #3a3a40; }
-        }
+        <!DOCTYPE html><html><head><meta charset="UTF-8">
+        <script>
+        // ✅ FIX #20: iframe workspace được tạo từ Blob URL nên kế thừa cùng origin
+        // với trang chủ -> đọc chung được localStorage. Đồng bộ đúng theme người
+        // dùng đã chọn thủ công (nexus-theme) thay vì chỉ đoán theo OS, và áp
+        // dụng TRƯỚC khi vẽ để không bị nháy sai màu.
+        (function(){
+            var t = null;
+            try { t = localStorage.getItem('nexus-theme'); } catch(e) {}
+            if (t !== 'dark' && t !== 'light') {
+                t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+            }
+            document.documentElement.setAttribute('data-theme', t);
+        })();
+        </script>
+        <style>
+        :root{--bg:#ffffff;--t1:#202124;--t2:#5f6368;--brd:#dadce0;--acc:#1a73e8;--panel:#f1f3f4}
+        :root[data-theme="dark"]{--bg:#1a1a1e;--t1:#e8eaed;--t2:#9aa0a6;--brd:#3a3a40;--acc:#8ab4f8;--panel:#2f2f35}
+        *{box-sizing:border-box}
+        body{margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);color:var(--t1);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+        .logo{display:flex;align-items:center;gap:14px;margin-bottom:28px}
+        .logo svg{width:46px;height:46px;color:var(--acc)}
+        h1{font-size:2.6rem;font-weight:600;letter-spacing:-.5px;margin:0}
+        .search-wrap{width:100%;max-width:580px;padding:0 20px}
+        .search{width:100%;padding:14px 20px;border-radius:26px;border:1px solid var(--brd);box-shadow:0 1px 6px rgba(0,0,0,.08);font-size:15px;outline:none;background:var(--panel);color:var(--t1)}
+        .search:focus{border-color:var(--acc)}
+        .hint{margin-top:16px;font-size:12.5px;color:var(--t2);text-align:center}
         </style></head><body>
+        <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 3.5v5.5c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V5.5L12 2z"/></svg>
         <h1>Nexus</h1>
-        <input type="text" class="search" placeholder="Search the web..." autofocus onkeydown="if(event.key==='Enter') window.top.postMessage(JSON.stringify({a:'nav-internal', p: this.value}), '*')">
+        </div>
+        <div class="search-wrap">
+        <input type="text" class="search" placeholder="Search the web..." autofocus onkeydown="if(event.key==='Enter'&&this.value.trim()) window.top.postMessage(JSON.stringify({a:'nav-internal', p: this.value}), '*')">
+        <div class="hint">Shields, Vault &amp; AI are one click away in the toolbar above.</div>
+        </div>
         </body></html>
         "#;
         render_page(home_html, &url, px);
@@ -1811,7 +1877,10 @@ fn main() {
                     "new-tab-url" => if let Some(url) = d.as_str() {
                         let mut g = ist.write().await;
                         let idx = g.new_tab(state::TabMode::Normal);
-                        ipx.send_event(Ev::NewTab(idx)).ok();
+                        // ✅ FIX #15: KHÔNG gửi Ev::NewTab ở đây — event đó khiến
+                        // tao event-loop tự spawn load_url("nexus://home") song
+                        // song với load_url(target) bên dưới, đua nhau ghi vào
+                        // cùng một tab và có thể xoá mất trang đích vừa mở.
                         update_tabs(&g, &ipx);
                         let u = url.to_string();
                         drop(g);
@@ -1939,11 +2008,16 @@ fn main() {
                     },
                     "password-detected" => {
                         let (url, user, pass) = (d["url"].as_str().unwrap_or(""), d["username"].as_str().unwrap_or(""), d["password"].as_str().unwrap_or(""));
-                        if !url.is_empty() && ist.read().await.global_cfg.auto_save_passwords {
+                        // ✅ FIX #16: đọc show_password_suggestions thay vì bỏ quên nó
+                        let (auto_save, suggest) = {
+                            let g = ist.read().await;
+                            (g.global_cfg.auto_save_passwords, g.global_cfg.show_password_suggestions)
+                        };
+                        if !url.is_empty() && auto_save {
                             let url_js = serde_json::to_string(url).unwrap_or_default();
                             let user_js = serde_json::to_string(user).unwrap_or_default();
                             let pass_js = serde_json::to_string(pass).unwrap_or_default();
-                            ipx.send_event(Ev::Js(format!(r#"if(window.showPassPopup)window.showPassPopup({{"url":{},"username":{},"password":{}}})"#, url_js, user_js, pass_js))).ok();
+                            ipx.send_event(Ev::Js(format!(r#"if(window.showPassPopup)window.showPassPopup({{"url":{},"username":{},"password":{},"suggest":{}}})"#, url_js, user_js, pass_js, suggest))).ok();
                         }
                     },
                     "save-password" => {
