@@ -575,12 +575,18 @@ mod vault {
         Some(key)
     }
 
-    // ✅ FIX #1: salt.decode_b64(&mut raw_salt) KHÔNG tồn tại → dùng b64_decode()
+    // ✅ FIX #22: password-hash 0.5.0 (bản đang được khoá qua Cargo.lock) yêu cầu
+    // b64_decode() nhận buffer &mut [u8] và trả về &[u8] mượn từ buffer đó
+    // (không phải Vec<u8> sở hữu như code cũ giả định) -> build lỗi E0061.
+    // Dùng đúng chữ ký compiler đã chỉ ra; #[allow(deprecated)] chỉ để tắt warning
+    // (decode_b64 là tên thay thế nhưng chưa chắc chắn cùng chữ ký nên không đánh cược).
+    #[allow(deprecated)]
     pub fn encrypt(data: &str, master: &str) -> Option<(String, String, String)> {
         if master.is_empty() { return None; }
         let salt = SaltString::generate(rand::thread_rng());
-        let salt_bytes = salt.b64_decode().ok()?;          // ✅ FIX
-        let key = derive_key(master, &salt_bytes)?;         // ✅ FIX: &salt_bytes
+        let mut salt_buf = [0u8; 64];
+        let salt_bytes = salt.b64_decode(&mut salt_buf).ok()?;
+        let key = derive_key(master, salt_bytes)?;
         let cipher = Aes256Gcm::new_from_slice(&key).ok()?;
 
         let mut nonce = [0u8; 12];
@@ -595,15 +601,17 @@ mod vault {
         ))
     }
 
-    // ✅ FIX #2: Cùng lỗi decode_b64
+    // ✅ FIX #22 (tiếp): cùng lỗi API buffer như encrypt()
+    #[allow(deprecated)]
     pub fn decrypt(enc: &str, nonce: &str, salt: &str, master: &str) -> Option<String> {
         let ciphertext = general_purpose::STANDARD.decode(enc).ok()?;
         let nonce_bytes = general_purpose::STANDARD.decode(nonce).ok()?;
         if nonce_bytes.len() != 12 { return None; }
 
         let salt_value = SaltString::from_b64(salt).ok()?;
-        let salt_bytes = salt_value.b64_decode().ok()?;     // ✅ FIX
-        let key = derive_key(master, &salt_bytes)?;          // ✅ FIX: &salt_bytes
+        let mut salt_buf = [0u8; 64];
+        let salt_bytes = salt_value.b64_decode(&mut salt_buf).ok()?;
+        let key = derive_key(master, salt_bytes)?;
         let cipher = Aes256Gcm::new_from_slice(&key).ok()?;
         String::from_utf8(cipher.decrypt(Nonce::from_slice(&nonce_bytes), ciphertext.as_slice()).ok()?).ok()
     }
@@ -1727,17 +1735,22 @@ async fn load_url_method(url: String, tab_idx: usize, method: &str, body: Option
             g.history.push(state::HistoryEntry { url: clean_url.clone(), title, time });
 
             // ✅ FIX #10: Chỉ clone 1 lần thay vì 2
+            // ✅ FIX #23: serialize ra JSON TRƯỚC khi move hist_clone vào tokio::spawn,
+            // nếu không sẽ bị lỗi "borrow of moved value" (E0382) vì hist_clone đã
+            // bị move vào closure async move bên dưới rồi mới dùng lại ở đây.
             let hist_clone = g.history.clone();
             let st_urls: Vec<String> = g.tabs.iter().map(|t| t.url.clone()).collect();
             update_tabs(&g, px);
             drop(g);
+
+            let hd = serde_json::to_string(&hist_clone).ok();
 
             tokio::spawn(async move {
                 state::save_history(&hist_clone).await;
                 state::save_session(&st_urls).await;
             });
 
-            if let Ok(hd) = serde_json::to_string(&hist_clone) {
+            if let Some(hd) = hd {
                 let _ = px.send_event(Ev::Js(format!(r#"if(window.renderHistory)window.renderHistory({})"#, hd)));
             }
         }
