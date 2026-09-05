@@ -17,14 +17,13 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact_name: nexus.exe
-            asset_name: nexus-windows-x64.zip
+            files: nexus-windows-x64.zip
           - os: ubuntu-latest
-            artifact_name: nexus
-            asset_name: nexus-linux-x64.zip
+            files: |
+              nexus-linux-x64.deb
+              nexus-linux-x64.AppImage
           - os: macos-latest
-            artifact_name: nexus
-            asset_name: nexus-macos-x64.zip
+            files: nexus-macos-x64.zip
 
     steps:
       - name: 📥 Checkout code
@@ -51,37 +50,92 @@ jobs:
       - name: 🔨 Build release
         run: cargo build --release
 
-      - name: 📁 Prepare and Package artifact (Windows)
+      # ---------- Windows ----------
+      - name: 📁 Package artifact (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           mkdir artifact
           Copy-Item target/release/nexus.exe artifact/
-          Compress-Archive -Path artifact/* -DestinationPath ${{ matrix.asset_name }}
+          Compress-Archive -Path artifact/* -DestinationPath nexus-windows-x64.zip
 
-      - name: 📁 Prepare and Package artifact (Linux & macOS)
-        if: matrix.os != 'windows-latest'
+      # ---------- macOS ----------
+      - name: 📁 Package artifact (macOS)
+        if: matrix.os == 'macos-latest'
         shell: bash
         run: |
           mkdir artifact
-          cp target/release/${{ matrix.artifact_name }} artifact/
-          zip -r ${{ matrix.asset_name }} artifact
+          cp target/release/nexus artifact/
+          zip -r nexus-macos-x64.zip artifact
+
+      # ---------- Linux: desktop entry chung cho .deb và AppImage ----------
+      - name: 🐧 Prepare desktop entry (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="0.0.0-$(echo "$GITHUB_SHA" | cut -c1-7)"
+          fi
+          echo "DEB_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+          cat > nexus.desktop <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=Nexus Browser
+          Comment=Privacy-focused web browser
+          Exec=nexus %u
+          Terminal=false
+          Categories=Network;WebBrowser;
+          EOF
+
+      - name: 📦 Build .deb (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          mkdir -p pkg/DEBIAN pkg/usr/bin pkg/usr/share/applications
+          cp target/release/nexus pkg/usr/bin/nexus
+          chmod 755 pkg/usr/bin/nexus
+          cp nexus.desktop pkg/usr/share/applications/nexus.desktop
+
+          cat > pkg/DEBIAN/control <<EOF
+          Package: nexus-browser
+          Version: $DEB_VERSION
+          Section: web
+          Priority: optional
+          Architecture: amd64
+          Depends: libwebkit2gtk-4.1-0, libgtk-3-0
+          Maintainer: ${{ github.repository_owner }} <noreply@github.com>
+          Description: Privacy-focused web browser built with Rust
+           Nexus blocks ads, trackers and fingerprinting out of the box.
+          EOF
+
+          dpkg-deb --build --root-owner-group pkg nexus-linux-x64.deb
+
+      - name: 📦 Build AppImage (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/releases/download/continuous/linuxdeploy-plugin-gtk-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk-x86_64.AppImage
+
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications
+          cp target/release/nexus AppDir/usr/bin/nexus
+          cp nexus.desktop AppDir/usr/share/applications/
+
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          export DEPLOY_GTK_VERSION=3
+          export OUTPUT=nexus-linux-x64.AppImage
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --executable AppDir/usr/bin/nexus \
+            --desktop-file AppDir/usr/share/applications/nexus.desktop \
+            --plugin gtk \
+            --output appimage
 
       - name: 🚀 Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.asset_name }}
+          files: ${{ matrix.files }}
           name: Nexus Browser ${{ github.ref_name }}
-          body: |
-            ## 🌌 Nexus Browser ${{ github.ref_name }}
-            
-            Download the appropriate version for your operating system:
-            - **Windows**: `nexus-windows-x64.zip`
-            - **Linux**: `nexus-linux-x64.zip`
-            - **macOS**: `nexus-macos-x64.zip`
-            
-            **Note:** For Tor/WARP, ensure their respective clients are running locally.
-          draft: false
-          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
