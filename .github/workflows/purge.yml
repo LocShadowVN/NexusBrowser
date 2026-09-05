@@ -1,0 +1,21 @@
+name: Purge releases & tags
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete all releases (+ their tags)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq '.[].tagName' \
+            | xargs -r -I{} gh release delete {} --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+
+      - name: Delete leftover tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/tags?per_page=100" --paginate --jq '.[].name' \
+            | xargs -r -I{} gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/{}"
