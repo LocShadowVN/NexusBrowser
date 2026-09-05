@@ -3,214 +3,277 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NEXUS — A Rust browser that answers to no one</title>
-<meta name="description" content="NEXUS is an open-source, privacy-first desktop browser written in Rust: encrypted vault, native AI assistant, one-click Tor/WARP, zero telemetry.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%230A0E13'/%3E%3Ctext x='12' y='16.5' font-family='monospace' font-size='13' fill='%2345D9C7' text-anchor='middle'%3E%3E%3C/text%3E%3C/svg%3E">
+<title>Nexus — A browser that answers to no one</title>
+<meta name="description" content="Nexus is an open-source, privacy-first desktop browser written in Rust: encrypted vault, two-layer ad blocking, Secure DNS, zero telemetry.">
 <style>
   :root{
-    --bg:#0A0E13; --bg-alt:#10151C; --bg-raised:rgba(16,21,28,.82); --bg-inset:#0D1219;
-    --border:#212A35; --border-soft:#1A222C;
-    --text:#E7ECF2; --text-dim:#8B95A3; --text-faint:#5B6472;
-    --accent:#45D9C7; --accent-soft:rgba(69,217,199,.12);
-    --signal:#FF8A3D; --signal-soft:rgba(255,138,61,.12);
-    --good:#3ADD8A; --bad:#F2555A; --warn:#FFC24B;
-    --radius:14px; --radius-sm:8px;
-    --shadow:0 20px 50px rgba(0,0,0,.35);
-    --font-mono:ui-monospace,'JetBrains Mono','Fira Code','SF Mono',Menlo,Consolas,'Liberation Mono',monospace;
-    --font-body:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    --bg:#F7F8FA; --surface:#FFFFFF; --inset:#F1F3F6;
+    --border:#E5E8EC; --border-soft:#EEF0F3;
+    --text:#17181A; --dim:#5A6169; --faint:#9AA1A9;
+    --accent:#2F5BEA; --accent-soft:rgba(47,91,234,.09);
+    --good:#178A4C; --bad:#D64550; --warn:#B07A00;
+    --radius:14px; --radius-sm:10px;
+    --font:-apple-system,BlinkMacSystemFont,'Segoe UI','Inter',Roboto,Helvetica,Arial,sans-serif;
     --ease:cubic-bezier(.16,1,.3,1);
+    --shadow:0 16px 44px rgba(23,24,26,.08);
   }
-  html.light{
-    --bg:#F4F6F8; --bg-alt:#FFFFFF; --bg-raised:rgba(255,255,255,.82); --bg-inset:#EDF0F3;
-    --border:#DFE4EA; --border-soft:#EAEDF1;
-    --text:#10151C; --text-dim:#5B6472; --text-faint:#8A93A0;
-    --accent:#0E9488; --accent-soft:rgba(14,148,136,.09);
-    --signal:#D9600A; --signal-soft:rgba(217,96,10,.09);
-    --good:#1E9E5A; --bad:#D64550; --warn:#B4790A;
-    --shadow:0 20px 50px rgba(16,21,28,.08);
+  html.dark{
+    --bg:#0F1013; --surface:#17191D; --inset:#121419;
+    --border:#272B32; --border-soft:#1F232A;
+    --text:#E9EAEE; --dim:#A2A9B2; --faint:#6A727C;
+    --accent:#8AA6FF; --accent-soft:rgba(138,166,255,.11);
+    --good:#4ECF87; --bad:#F07A80; --warn:#E8C268;
+    --shadow:0 16px 44px rgba(0,0,0,.38);
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html{scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;
-    transition:background .25s var(--ease),color .25s var(--ease);-webkit-font-smoothing:antialiased}
-  img,svg{display:block;max-width:100%}
+  body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.65;
+    -webkit-font-smoothing:antialiased;transition:background .25s,color .25s}
   a{color:inherit}
   :focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
-  .container{max-width:1180px;margin:0 auto;padding:0 24px}
-  .mono{font-family:var(--font-mono)}
+  .container{max-width:1100px;margin:0 auto;padding:0 24px}
   ::selection{background:var(--accent-soft);color:var(--accent)}
+  svg{stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 
-  /* background texture: faint grid, dims in light mode */
-  body::before{
-    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
-    background-image:
-      linear-gradient(var(--border-soft) 1px,transparent 1px),
-      linear-gradient(90deg,var(--border-soft) 1px,transparent 1px);
-    background-size:64px 64px;opacity:.4;mask-image:radial-gradient(ellipse 80% 55% at 50% 0%,#000 40%,transparent 90%);
-  }
+  /* subtle top glow, very quiet */
+  body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:radial-gradient(ellipse 60% 40% at 50% -10%,var(--accent-soft),transparent 70%)}
 
   /* NAV */
   nav{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;
-    padding:18px 24px;backdrop-filter:blur(14px);background:var(--bg-raised);border-bottom:1px solid var(--border-soft)}
-  .brand{display:flex;align-items:center;gap:2px;font-family:var(--font-mono);font-weight:700;font-size:1.05rem;
-    letter-spacing:-.02em;text-decoration:none;color:var(--text)}
-  .brand .caret{color:var(--accent)}
-  .brand .blink{display:inline-block;width:8px;height:1.1em;background:var(--accent);margin-left:4px;
-    animation:blink 1.1s steps(1) infinite;vertical-align:-2px}
-  @keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
-  .nav-right{display:flex;align-items:center;gap:32px}
-  .nav-links{display:flex;gap:28px}
-  .nav-links a{text-decoration:none;color:var(--text-dim);font-size:.92rem;font-weight:500;transition:color .15s}
+    padding:14px 24px;backdrop-filter:blur(12px);background:color-mix(in srgb,var(--bg) 85%,transparent);
+    border-bottom:1px solid var(--border-soft)}
+  .logo{display:flex;align-items:center;gap:9px;text-decoration:none;color:var(--text);
+    font-weight:700;font-size:1.05rem;letter-spacing:-.01em}
+  .logo-mark{width:28px;height:28px;border-radius:8px;background:var(--accent);color:#fff;display:flex;
+    align-items:center;justify-content:center;flex-shrink:0}
+  html.dark .logo-mark{color:#0D1430}
+  .logo-mark svg{width:15px;height:15px}
+  .nav-right{display:flex;align-items:center;gap:22px}
+  .nav-links{display:flex;gap:20px}
+  .nav-links a{text-decoration:none;color:var(--dim);font-size:.92rem;font-weight:500;transition:color .15s}
   .nav-links a:hover{color:var(--accent)}
-  .theme-btn{width:38px;height:38px;border-radius:50%;border:1px solid var(--border);background:var(--bg-alt);
-    color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.2s}
+  .theme-btn{width:34px;height:34px;border-radius:50%;border:1px solid var(--border);background:var(--surface);
+    color:var(--dim);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.2s}
   .theme-btn:hover{border-color:var(--accent);color:var(--accent)}
-  @media(max-width:760px){.nav-links{display:none}}
+  .theme-btn svg{width:15px;height:15px}
+  .gh-btn{display:inline-flex;align-items:center;gap:7px;padding:8px 14px;border-radius:var(--radius-sm);
+    border:1px solid var(--border);background:var(--surface);color:var(--dim);font-size:.88rem;font-weight:600;
+    text-decoration:none;transition:.2s}
+  .gh-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .gh-btn svg{width:15px;height:15px}
+  @media(max-width:860px){.nav-links{display:none}}
 
   /* HERO */
-  .hero{padding:96px 0 64px}
-  .hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center}
-  @media(max-width:960px){.hero-grid{grid-template-columns:1fr;gap:48px}}
-  .eyebrow{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:.78rem;
-    color:var(--accent);background:var(--accent-soft);border:1px solid var(--border);padding:6px 12px;
-    border-radius:100px;margin-bottom:24px;letter-spacing:.02em}
-  .eyebrow::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--good);
-    box-shadow:0 0 0 3px color-mix(in srgb, var(--good) 25%, transparent)}
-  h1{font-family:var(--font-mono);font-weight:700;font-size:clamp(2.3rem,4.6vw,3.6rem);line-height:1.08;
-    letter-spacing:-.02em;margin-bottom:22px}
-  h1 .accent{color:var(--accent)}
-  .hero p.lead{font-size:1.1rem;color:var(--text-dim);max-width:520px;margin-bottom:36px}
-  .hero p.lead code{font-family:var(--font-mono);background:var(--bg-inset);border:1px solid var(--border);
-    padding:1px 6px;border-radius:4px;font-size:.92em;color:var(--text)}
-
-  .cta-row{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px}
-  .btn{display:inline-flex;align-items:center;gap:10px;padding:13px 22px;border-radius:var(--radius-sm);
-    font-weight:600;font-size:.95rem;text-decoration:none;border:1px solid var(--border);transition:.2s var(--ease)}
-  .btn svg{width:18px;height:18px}
-  .btn-primary{background:var(--accent);border-color:var(--accent);color:#08211D}
-  html.light .btn-primary{color:#fff}
+  .hero{padding:76px 0 64px}
+  .hero-grid{display:grid;grid-template-columns:1fr 1.08fr;gap:52px;align-items:center}
+  @media(max-width:960px){.hero-grid{grid-template-columns:1fr;gap:44px}}
+  .pill{display:inline-flex;align-items:center;gap:8px;font-size:.78rem;font-weight:600;color:var(--accent);
+    background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 22%,var(--border));
+    padding:5px 13px;border-radius:100px;margin-bottom:20px}
+  .pill .dot{width:6px;height:6px;border-radius:50%;background:var(--good);
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--good) 22%,transparent)}
+  h1{font-size:clamp(2.1rem,4.2vw,3rem);line-height:1.14;letter-spacing:-.025em;font-weight:800;margin-bottom:18px}
+  h1 em{font-style:normal;color:var(--accent)}
+  .hero p.lead{font-size:1.06rem;color:var(--dim);max-width:480px;margin-bottom:30px}
+  .hero p.lead code{font-family:ui-monospace,Menlo,Consolas,monospace;background:var(--inset);
+    border:1px solid var(--border);padding:1px 6px;border-radius:5px;font-size:.88em;color:var(--text)}
+  .cta-row{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:11px 19px;border-radius:var(--radius-sm);
+    font-weight:600;font-size:.92rem;text-decoration:none;border:1px solid var(--border);transition:.2s var(--ease)}
+  .btn svg{width:15px;height:15px;flex-shrink:0}
+  .btn small{font-weight:500;opacity:.6;font-size:.72rem}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  html.dark .btn-primary{color:#0D1430}
   .btn-primary:hover{transform:translateY(-2px);box-shadow:0 10px 24px var(--accent-soft)}
-  .btn-ghost{background:var(--bg-alt);color:var(--text)}
+  .btn-ghost{background:var(--surface);color:var(--text)}
   .btn-ghost:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-2px)}
-  .fine-print{font-family:var(--font-mono);font-size:.78rem;color:var(--text-faint)}
+  .fine-print{font-size:.78rem;color:var(--faint)}
 
-  /* TERMINAL PANEL */
-  .term{background:var(--bg-inset);border:1px solid var(--border);border-radius:var(--radius);
-    box-shadow:var(--shadow);overflow:hidden}
-  .term-bar{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border-soft);
-    background:var(--bg-alt)}
-  .term-dot{width:10px;height:10px;border-radius:50%}
-  .term-bar .fine-print{margin-left:auto}
-  .term-body{padding:20px 22px 22px;font-family:var(--font-mono);font-size:.86rem;min-height:238px}
-  .term-line{color:var(--text-dim);margin-bottom:9px;opacity:0;white-space:pre-wrap}
-  .term-line.show{opacity:1}
-  .term-line .ok{color:var(--good)}
-  .term-line .prompt{color:var(--accent)}
-  .cursor-blink{display:inline-block;width:7px;height:1em;background:var(--accent);vertical-align:-2px;
-    animation:blink 1s steps(1) infinite}
+  /* STATS */
+  .stats{border-top:1px solid var(--border-soft);border-bottom:1px solid var(--border-soft);padding:20px 0}
+  .stats-row{display:flex;flex-wrap:wrap;justify-content:space-between}
+  .stat{padding:6px 16px;flex:1;min-width:130px}
+  .stat .k{font-size:.68rem;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;font-weight:600;display:block;margin-bottom:3px}
+  .stat .v{font-size:1rem;color:var(--accent);font-weight:700}
 
-  .gauge-wrap{border-top:1px solid var(--border-soft);padding:18px 22px 22px}
-  .gauge-title{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:.72rem;
-    color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px}
-  .gauge-row{display:flex;align-items:center;gap:12px;margin-bottom:10px;font-family:var(--font-mono);font-size:.78rem}
-  .gauge-row .label{width:118px;color:var(--text-dim);flex-shrink:0}
-  .gauge-track{flex:1;height:8px;background:var(--bg-alt);border:1px solid var(--border-soft);border-radius:6px;overflow:hidden}
-  .gauge-fill{height:100%;width:0;border-radius:6px;transition:width 1.1s var(--ease)}
-  .gauge-fill.nexus{background:var(--accent)}
-  .gauge-fill.chromium{background:var(--text-faint)}
+  /* SECTIONS */
+  section{padding:84px 0;border-top:1px solid var(--border-soft)}
+  section:first-of-type{border-top:none}
+  .sec-title{font-size:clamp(1.55rem,2.8vw,2.05rem);font-weight:800;letter-spacing:-.02em;line-height:1.2;margin-bottom:10px}
+  .sec-sub{color:var(--dim);max-width:600px;font-size:1rem;margin-bottom:44px}
+  .sec-label{font-size:.76rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px}
 
-  /* STAT STRIP */
-  .stats{border-top:1px solid var(--border-soft);border-bottom:1px solid var(--border-soft);padding:22px 0}
-  .stats-row{display:flex;flex-wrap:wrap;gap:0;justify-content:space-between}
-  .stat{font-family:var(--font-mono);padding:6px 20px;flex:1;min-width:150px}
-  .stat .k{font-size:.68rem;color:var(--text-faint);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:4px}
-  .stat .v{font-size:1.05rem;color:var(--accent);font-weight:600}
-
-  /* SECTION SHELL */
-  section{padding:100px 0}
-  .eyebrow-label{font-family:var(--font-mono);font-size:.8rem;color:var(--accent);margin-bottom:14px;letter-spacing:.02em}
-  .section-title{font-family:var(--font-mono);font-size:clamp(1.7rem,3vw,2.3rem);font-weight:700;
-    letter-spacing:-.01em;margin-bottom:16px;max-width:640px}
-  .section-sub{color:var(--text-dim);max-width:560px;font-size:1.02rem;margin-bottom:56px}
+  /* MOCKUP */
+  .mock{background:var(--surface);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:var(--shadow)}
+  .mock-tabbar{display:flex;align-items:flex-end;gap:4px;background:var(--bg);padding:8px 10px 0;border-bottom:1px solid var(--border)}
+  .mtab{display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;border-radius:9px 9px 0 0;
+    color:var(--dim);font-size:.76rem;max-width:180px;white-space:nowrap;overflow:hidden}
+  .mtab .dot{width:14px;height:14px;border-radius:4px;background:var(--faint);flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;font-size:8px;color:var(--bg);font-weight:700}
+  .mtab.active{background:var(--surface);color:var(--text);border:1px solid var(--border);border-bottom:none}
+  .mtab.active .dot{background:var(--accent);color:#fff}
+  html.dark .mtab.active .dot{color:#0D1430}
+  .mtab .x{margin-left:auto;opacity:.5}
+  .mtab-plus{width:28px;height:28px;border-radius:50%;color:var(--dim);display:flex;align-items:center;justify-content:center;font-size:1rem;margin:0 0 5px 4px}
+  .mock-toolbar{display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--surface);border-bottom:1px solid var(--border-soft);font-size:.78rem}
+  .mico{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--dim);flex-shrink:0;font-size:.85rem}
+  .mock-url{flex:1;display:flex;align-items:center;gap:8px;height:30px;background:var(--inset);
+    border:1px solid var(--border-soft);border-radius:15px;padding:0 12px;color:var(--dim);min-width:0;font-size:.76rem}
+  .mock-url .lock{color:var(--good);width:11px;height:11px;flex-shrink:0}
+  .mock-url .txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+  .mock-url .star{margin-left:auto;color:var(--warn);width:13px;height:13px;flex-shrink:0}
+  .mshield{height:26px;padding:0 10px;border-radius:13px;border:1px solid var(--border);
+    display:flex;align-items:center;gap:6px;color:var(--dim);font-size:.7rem;font-weight:600;flex-shrink:0}
+  .mshield svg{width:12px;height:12px;color:var(--accent)}
+  .mshield .n{color:var(--accent)}
+  .mock-body{position:relative;background:var(--inset);padding:26px 28px 30px;min-height:330px}
+  .mock-page-line{height:9px;border-radius:5px;background:var(--surface);margin-bottom:11px;opacity:.85}
+  .mock-page-line.h1{width:42%;height:15px;opacity:1}
+  .mock-page-line.m{width:66%}.mock-page-line.s{width:52%}.mock-page-line.t{width:74%}
+  .mock-ad{width:62%;height:52px;border-radius:8px;border:1.5px dashed var(--bad);margin:16px 0;
+    display:flex;align-items:center;justify-content:center;font-size:.72rem;color:var(--bad);opacity:.7;font-weight:600}
+  .mpop{position:absolute;top:64px;right:88px;width:272px;background:var(--surface);border:1px solid var(--border);
+    border-radius:12px;box-shadow:var(--shadow);padding:10px;z-index:5}
+  .mpop .h{font-size:.8rem;font-weight:700;padding:4px 8px 2px}
+  .mpop .c{font-size:.68rem;color:var(--dim);padding:0 8px 8px;border-bottom:1px solid var(--border-soft);margin-bottom:6px}
+  .mlist{max-height:98px;overflow:hidden;border:1px solid var(--border-soft);border-radius:8px;margin:0 2px 8px}
+  .mlist .r{display:flex;gap:8px;padding:5px 9px;font-size:.63rem;border-bottom:1px solid var(--border-soft);color:var(--dim)}
+  .mlist .r:last-child{border-bottom:none}
+  .mlist .u{flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mlist .k{flex-shrink:0;font-weight:600}
+  .mlist .k.trk{color:var(--warn)}.mlist .k.ad{color:var(--bad)}
+  .mlist .n{color:var(--accent);font-weight:700;flex-shrink:0}
+  .mseg{display:flex;background:var(--inset);border-radius:8px;padding:3px;margin:2px 2px 6px}
+  .mseg span{flex:1;text-align:center;padding:5px 0;border-radius:6px;font-size:.66rem;color:var(--dim);font-weight:600}
+  .mseg .on{background:var(--surface);color:var(--accent);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+  .mpop .note{font-size:.62rem;color:var(--faint);line-height:1.5;padding:0 8px 4px}
+  @media(max-width:640px){.mpop{right:12px;top:80px;width:230px}}
 
   /* FEATURES */
-  .grid-6{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+  .grid-6{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
   @media(max-width:900px){.grid-6{grid-template-columns:repeat(2,1fr)}}
   @media(max-width:620px){.grid-6{grid-template-columns:1fr}}
-  .card{background:var(--bg-alt);border:1px solid var(--border);border-radius:var(--radius);padding:28px;
-    transition:.25s var(--ease)}
-  .card:hover{border-color:var(--accent);transform:translateY(-4px)}
-  .card .icon{width:42px;height:42px;border-radius:10px;background:var(--accent-soft);color:var(--accent);
-    display:flex;align-items:center;justify-content:center;margin-bottom:18px}
-  .card .icon svg{width:22px;height:22px}
-  .card h3{font-size:1.08rem;font-weight:700;margin-bottom:9px}
-  .card p{color:var(--text-dim);font-size:.92rem;line-height:1.6}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:26px;transition:.25s var(--ease)}
+  .card:hover{border-color:var(--accent);transform:translateY(-3px);box-shadow:var(--shadow)}
+  .card .icon{width:42px;height:42px;border-radius:11px;background:var(--accent-soft);color:var(--accent);
+    display:flex;align-items:center;justify-content:center;margin-bottom:16px}
+  .card .icon svg{width:20px;height:20px}
+  .card h3{font-size:1.02rem;font-weight:700;margin-bottom:8px;letter-spacing:-.01em}
+  .card p{color:var(--dim);font-size:.89rem;line-height:1.62}
+  .card p code{font-family:ui-monospace,Menlo,Consolas,monospace;background:var(--inset);
+    border:1px solid var(--border-soft);padding:0 5px;border-radius:4px;font-size:.84em}
 
-  /* COMPARISON */
-  .table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-alt)}
-  table{width:100%;border-collapse:collapse;min-width:640px}
-  th,td{padding:16px 20px;text-align:left;border-bottom:1px solid var(--border-soft);font-size:.92rem}
-  thead th{font-family:var(--font-mono);font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;
-    color:var(--text-faint);background:var(--bg-inset)}
-  tbody td:first-child{font-weight:600;color:var(--text)}
-  tbody td:not(:first-child){font-family:var(--font-mono);font-size:.86rem;color:var(--text-dim)}
+  /* SHIELD */
+  .layers{display:grid;grid-template-columns:1fr auto 1fr;gap:14px;align-items:stretch}
+  @media(max-width:820px){.layers{grid-template-columns:1fr}}
+  .layer{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px}
+  .layer .icon{width:42px;height:42px;border-radius:11px;background:var(--accent-soft);color:var(--accent);
+    display:flex;align-items:center;justify-content:center;margin-bottom:14px}
+  .layer .icon svg{width:20px;height:20px}
+  .layer .tag{font-size:.68rem;color:var(--faint);font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;display:block}
+  .layer h3{font-size:1rem;margin-bottom:8px}
+  .layer p{font-size:.87rem;color:var(--dim)}
+  .layer-arrow{display:flex;align-items:center;justify-content:center;color:var(--faint)}
+  .layer-arrow svg{width:22px;height:22px}
+  @media(max-width:820px){.layer-arrow{transform:rotate(90deg)}}
+  .levels{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin:18px 0}
+  @media(max-width:820px){.levels{grid-template-columns:1fr}}
+  .level{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:22px}
+  .level .lv{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;display:block}
+  .level h3{font-size:1rem;margin-bottom:8px}
+  .level ul{list-style:none;font-size:.85rem;color:var(--dim)}
+  .level li{padding:3px 0 3px 22px;position:relative}
+  .level li svg{position:absolute;left:0;top:5px;width:13px;height:13px}
+  .level.st .lv{color:var(--good)}.level.st li svg{color:var(--good)}
+  .level.ba .lv{color:var(--accent)}.level.ba li svg{color:var(--accent)}
+  .level.of .lv{color:var(--faint)}.level.of li{color:var(--faint)}
+  .dnsbar{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 24px;
+    display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+  .dnsbar .icon{width:42px;height:42px;border-radius:11px;background:var(--accent-soft);color:var(--accent);
+    display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .dnsbar .icon svg{width:20px;height:20px}
+  .dnsbar p{margin:0;font-size:.89rem;color:var(--dim)}
+  .dnsbar b{color:var(--text)}
+
+  /* COMPARE */
+  .table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+  table{width:100%;border-collapse:collapse;min-width:660px}
+  th,td{padding:13px 18px;text-align:left;border-bottom:1px solid var(--border-soft);font-size:.88rem}
+  thead th{font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;font-weight:700;
+    color:var(--faint);background:var(--inset)}
+  thead th.nx{color:var(--accent)}
+  tbody td:first-child{font-weight:600}
+  tbody td:not(:first-child){font-size:.82rem;color:var(--dim)}
+  tbody td.nx{color:var(--text);font-weight:600}
   tbody tr:last-child td{border-bottom:none}
-  tbody tr:hover{background:var(--bg-inset)}
-  .mk-good{color:var(--good)}
-  .mk-bad{color:var(--bad)}
-  .mk-warn{color:var(--warn)}
-  .table-note{font-size:.82rem;color:var(--text-faint);margin-top:14px;font-family:var(--font-mono)}
+  tbody tr:hover{background:var(--inset)}
+  .mk-good{color:var(--good)}.mk-bad{color:var(--bad)}.mk-warn{color:var(--warn)}
+  .table-note{font-size:.78rem;color:var(--faint);margin-top:12px}
+
+  /* SHORTCUTS */
+  .keys-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px 40px}
+  @media(max-width:720px){.keys-grid{grid-template-columns:1fr}}
+  .krow{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 2px;
+    border-bottom:1px solid var(--border-soft);font-size:.88rem;color:var(--dim)}
+  kbd{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.72rem;background:var(--surface);
+    border:1px solid var(--border);border-bottom-width:2px;border-radius:6px;padding:3px 8px;color:var(--text);white-space:nowrap}
 
   /* OPEN SOURCE */
-  .oss{background:var(--bg-alt);border:1px solid var(--border);border-radius:24px;padding:64px;
-    display:grid;grid-template-columns:1.1fr .9fr;gap:48px;align-items:center}
-  @media(max-width:900px){.oss{grid-template-columns:1fr;padding:40px 28px}}
-  .oss p{color:var(--text-dim);margin:18px 0 28px;line-height:1.7}
-  .oss-list{list-style:none;display:flex;flex-direction:column;gap:12px;font-family:var(--font-mono);font-size:.88rem}
-  .oss-list li{display:flex;gap:10px;align-items:baseline;color:var(--text-dim)}
-  .oss-list .ok{color:var(--good);flex-shrink:0}
-  .license-card{background:var(--bg-inset);border:1px solid var(--border);border-radius:var(--radius-sm);padding:24px}
-  .license-card .k{font-family:var(--font-mono);font-size:.72rem;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:8px}
-  .license-card .v{font-family:var(--font-mono);font-size:1.05rem;color:var(--text);margin-bottom:18px}
+  .oss{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:52px;
+    display:grid;grid-template-columns:1.1fr .9fr;gap:44px;align-items:center}
+  @media(max-width:900px){.oss{grid-template-columns:1fr;padding:36px 26px}}
+  .oss p{color:var(--dim);margin:16px 0 24px;line-height:1.7;font-size:.95rem}
+  .oss-list{list-style:none;display:flex;flex-direction:column;gap:12px;font-size:.9rem;color:var(--dim)}
+  .oss-list li{display:flex;gap:10px;align-items:flex-start}
+  .oss-list svg{width:15px;height:15px;color:var(--good);flex-shrink:0;margin-top:4px}
+  .license-card{background:var(--inset);border:1px solid var(--border);border-radius:var(--radius-sm);padding:24px}
+  .license-card .k{font-size:.68rem;color:var(--faint);text-transform:uppercase;letter-spacing:.07em;font-weight:700;display:block;margin-bottom:6px}
+  .license-card .v{font-size:.95rem;color:var(--text);margin-bottom:16px;font-weight:600}
   .license-card .v:last-child{margin-bottom:0}
 
   /* FAQ */
-  details{background:var(--bg-alt);border:1px solid var(--border);border-radius:var(--radius-sm);
-    margin-bottom:12px;padding:18px 22px;transition:border-color .2s}
+  details{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);
+    margin-bottom:10px;padding:17px 21px;transition:border-color .2s}
   details[open]{border-color:var(--accent)}
-  summary{cursor:pointer;font-weight:600;list-style:none;display:flex;justify-content:space-between;
-    align-items:center;gap:16px}
+  summary{cursor:pointer;font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:16px;font-size:.95rem}
   summary::-webkit-details-marker{display:none}
-  summary::after{content:"+";font-family:var(--font-mono);font-size:1.2rem;color:var(--accent);flex-shrink:0;
-    transition:transform .2s}
-  details[open] summary::after{transform:rotate(45deg)}
-  details p{color:var(--text-dim);margin-top:14px;font-size:.94rem;line-height:1.65}
+  summary svg{width:16px;height:16px;color:var(--accent);flex-shrink:0;transition:transform .2s}
+  details[open] summary svg{transform:rotate(45deg)}
+  details p{color:var(--dim);margin-top:12px;font-size:.9rem;line-height:1.65}
 
-  footer{border-top:1px solid var(--border-soft);padding:44px 0;text-align:center}
-  footer .mono{color:var(--text-faint);font-size:.82rem}
-  footer a{color:var(--text-dim);text-decoration:none}
+  footer{border-top:1px solid var(--border-soft);padding:38px 0;text-align:center;font-size:.82rem;color:var(--faint)}
+  footer a{color:var(--dim);text-decoration:none}
   footer a:hover{color:var(--accent)}
 
   @media(prefers-reduced-motion:reduce){
-    *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+    *{animation-duration:.001ms!important;transition-duration:.001ms!important}
   }
 </style>
 </head>
 <body>
 
 <nav>
-  <a href="#" class="brand"><span class="caret">&gt;</span>&nbsp;nexus_<span class="blink"></span></a>
+  <a href="#" class="logo">
+    <span class="logo-mark">
+      <svg viewBox="0 0 24 24"><path d="M12 3l7 3.5V12c0 4.6-3.1 7.9-7 9.5-3.9-1.6-7-4.9-7-9.5V6.5z"/></svg>
+    </span>
+    Nexus
+  </a>
   <div class="nav-right">
     <div class="nav-links">
       <a href="#features">Features</a>
+      <a href="#shield">Shield</a>
       <a href="#compare">Compare</a>
-      <a href="#opensource">Open Source</a>
       <a href="#faq">FAQ</a>
-      <a href="https://github.com/LocShadowVN/nexus-browser" target="_blank" rel="noopener">GitHub</a>
     </div>
-    <button class="theme-btn" onclick="toggleTheme()" aria-label="Toggle color theme" id="themeBtn">
-      <svg id="iconSun" xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8L6 18M18 6l1.8-1.8"/></svg>
-      <svg id="iconMoon" style="display:none" xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.8 6.8 0 0 0 10.5 10.5z"/></svg>
+    <a href="https://github.com/LocShadowVN/NexusBrowser" target="_blank" rel="noopener" class="gh-btn">
+      <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.8 0-1.3.5-2.3 1.2-3.2-.1-.3-.5-1.5.1-3 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.6 1.5.2 2.7.1 3 .8.9 1.2 1.9 1.2 3.2 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z"/></svg>
+      GitHub
+    </a>
+    <button class="theme-btn" onclick="toggleTheme()" aria-label="Toggle color theme">
+      <svg id="iconSun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8L6 18M18 6l1.8-1.8"/></svg>
+      <svg id="iconMoon" style="display:none" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.8 6.8 0 0 0 10.5 10.5z"/></svg>
     </button>
   </div>
 </nav>
@@ -218,53 +281,63 @@
 <header class="hero">
   <div class="container hero-grid">
     <div>
-      <div class="eyebrow">rust · open source · zero telemetry</div>
-      <h1>A browser that answers to <span class="accent">no one</span> but you.</h1>
-      <p class="lead">NEXUS is a desktop browser built from scratch in Rust — an encrypted vault, a native
-        AI assistant you bring your own key to, and one-click <code>Tor</code> / <code>WARP</code> routing.
-        No company behind it, no data leaving your machine unless you send it.</p>
+      <span class="pill"><span class="dot"></span> Open source · zero telemetry</span>
+      <h1>A browser that answers to <em>no one</em> but you.</h1>
+      <p class="lead">Nexus is a desktop browser built from scratch in Rust — an AES-encrypted password vault,
+        ad &amp; tracker blocking at <em>both</em> the page and network layer, and Secure DNS through
+        <code>1.1.1.1</code>. No company behind it, no data leaving your machine.</p>
       <div class="cta-row">
-        <a href="https://github.com/LocShadowVN/nexus-browser/releases/latest/download/nexus-windows-x64.zip" class="btn btn-primary">
-          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg>
-          Download for Windows
+        <a href="https://github.com/LocShadowVN/NexusBrowser/releases/latest/download/nexus-windows-x64.zip" class="btn btn-primary">
+          <svg viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M5 21h14"/></svg>
+          Windows <small>.zip</small>
         </a>
-        <a href="https://github.com/LocShadowVN/nexus-browser/releases/latest/download/nexus-linux-x64.zip" class="btn btn-ghost">
-          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c-3 0-5 2-5 5 0 1 .5 2 1 2.5C6 11 5 13 5 15c0 3 3 7 7 7s7-4 7-7c0-2-1-4-3-5.5.5-.5 1-1.5 1-2.5 0-3-2-5-5-5zm0 2c1.5 0 3 1 3 3s-1.5 3-3 3-3-1-3-3 1.5-3 3-3zm-2 4c-.5 0-1 .5-1 1s.5 1 1 1 1-.5 1-1-.5-1-1-1zm4 0c-.5 0-1 .5-1 1s.5 1 1 1 1-.5 1-1-.5-1-1-1z"/></svg>
-          Linux
-        </a>
-        <a href="https://github.com/LocShadowVN/nexus-browser/releases/latest/download/nexus-macos-x64.zip" class="btn btn-ghost">
-          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
-          macOS
-        </a>
+        <a href="https://github.com/LocShadowVN/NexusBrowser/releases/latest/download/nexus-linux-x64.deb" class="btn btn-ghost">Linux <small>.deb</small></a>
+        <a href="https://github.com/LocShadowVN/NexusBrowser/releases/latest/download/nexus-linux-x64.AppImage" class="btn btn-ghost">Linux <small>.AppImage</small></a>
+        <a href="https://github.com/LocShadowVN/NexusBrowser/releases/latest/download/nexus-macos-x64.zip" class="btn btn-ghost">macOS <small>.zip</small></a>
       </div>
-      <div class="fine-print">No installer · no account · no telemetry endpoint to opt out of</div>
+      <p class="fine-print">No installer · no account · nothing to opt out of</p>
     </div>
 
-    <div class="term" id="termPanel">
-      <div class="term-bar">
-        <span class="term-dot" style="background:#F2555A"></span>
-        <span class="term-dot" style="background:#FFC24B"></span>
-        <span class="term-dot" style="background:#3ADD8A"></span>
-        <span class="fine-print mono">nexus --init</span>
+    <div class="mock">
+      <div class="mock-tabbar">
+        <div class="mtab active"><span class="dot">W</span> Rust (programming… <span class="x">×</span></div>
+        <div class="mtab"><span class="dot">G</span> Inbox (3) <span class="x">×</span></div>
+        <div class="mtab"><span class="dot">N</span> News <span class="x">×</span></div>
+        <div class="mtab-plus">+</div>
       </div>
-      <div class="term-body" id="termBody">
-        <div class="term-line"><span class="prompt">$</span> nexus --init</div>
-        <div class="term-line">✓ <span class="ok">AES-256-GCM</span> vault unlocked</div>
-        <div class="term-line">✓ ad &amp; tracker blocking active</div>
-        <div class="term-line">✓ tor / warp routing ready</div>
-        <div class="term-line">✓ 12 idle tabs suspended, 0 dropped</div>
-        <div class="term-line">✓ outbound telemetry: <span class="ok">none configured</span></div>
-        <div class="term-line"><span class="prompt">&gt;</span> ready<span class="cursor-blink"></span></div>
-      </div>
-      <div class="gauge-wrap">
-        <div class="gauge-title"><span>idle memory, illustrative</span><span>lower is better</span></div>
-        <div class="gauge-row">
-          <span class="label">nexus</span>
-          <div class="gauge-track"><div class="gauge-fill nexus" id="gaugeNexus"></div></div>
+      <div class="mock-toolbar">
+        <div class="mico">←</div><div class="mico">→</div><div class="mico">⟳</div><div class="mico">⌂</div>
+        <div class="mock-url">
+          <svg class="lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+          <span class="txt">en.wikipedia.org/wiki/Rust</span>
+          <svg class="star" viewBox="0 0 24 24"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg>
         </div>
-        <div class="gauge-row">
-          <span class="label">typical chromium</span>
-          <div class="gauge-track"><div class="gauge-fill chromium" id="gaugeChromium"></div></div>
+        <div class="mshield">
+          <svg viewBox="0 0 24 24"><path d="M12 3l7 3.5V12c0 4.6-3.1 7.9-7 9.5-3.9-1.6-7-4.9-7-9.5V6.5z"/></svg>
+          blocked <span class="n">14</span>
+        </div>
+        <div class="mico">↓</div><div class="mico">⋮</div>
+      </div>
+      <div class="mock-body">
+        <div class="mock-page-line h1"></div>
+        <div class="mock-page-line t"></div>
+        <div class="mock-page-line m"></div>
+        <div class="mock-ad">ad slot — removed before paint</div>
+        <div class="mock-page-line s"></div>
+        <div class="mock-page-line t"></div>
+
+        <div class="mpop">
+          <div class="h">Protections for this site</div>
+          <div class="c">Blocked 14 requests on this page · 1,284 lifetime</div>
+          <div class="mlist">
+            <div class="r"><span class="u">google-analytics.com</span><span class="k trk">Tracker</span><span class="n">×4</span></div>
+            <div class="r"><span class="u">doubleclick.net</span><span class="k ad">Ad</span><span class="n">×3</span></div>
+            <div class="r"><span class="u">googletagmanager.com</span><span class="k trk">Tracker</span><span class="n">×2</span></div>
+            <div class="r"><span class="u">scorecardresearch.com</span><span class="k ad">Ad</span><span class="n">×1</span></div>
+            <div class="r"><span class="u">facebook.com/tr</span><span class="k trk">Tracker</span><span class="n">×4</span></div>
+          </div>
+          <div class="mseg"><span>Strict</span><span class="on">Balanced</span><span>Off</span></div>
+          <div class="note">Per-tab. Changes take effect on the next reload.</div>
         </div>
       </div>
     </div>
@@ -274,75 +347,162 @@
 <div class="stats">
   <div class="container stats-row">
     <div class="stat"><span class="k">Engine</span><span class="v">100% Rust</span></div>
+    <div class="stat"><span class="k">Blocking layers</span><span class="v">2</span></div>
     <div class="stat"><span class="k">Telemetry</span><span class="v">0 endpoints</span></div>
-    <div class="stat"><span class="k">License</span><span class="v">MPL-2.0 / Apache-2.0</span></div>
+    <div class="stat"><span class="k">License</span><span class="v">MPL-2.0</span></div>
     <div class="stat"><span class="k">Cost</span><span class="v">Free, forever</span></div>
   </div>
 </div>
 
 <section id="features">
   <div class="container">
-    <div class="eyebrow-label">// features</div>
-    <h2 class="section-title">Everything a browser needs. Nothing it doesn't.</h2>
-    <p class="section-sub">No bundled search deals, no upsells, no "recommended by NEXUS" cards. Just the parts a browser is actually for.</p>
+    <span class="sec-label">Features</span>
+    <h2 class="sec-title">Everything a browser needs. Nothing it doesn't.</h2>
+    <p class="sec-sub">No bundled search deals, no upsells, no "recommended by Nexus" cards. Just the parts a browser is actually for.</p>
     <div class="grid-6">
       <div class="card">
-        <div class="icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+        <div class="icon"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
         <h3>Encrypted vault</h3>
-        <p>Passwords are sealed with AES-256-GCM and an Argon2id-derived key. Your master password never leaves the device — there's no cloud to breach.</p>
+        <p>Passwords are sealed with AES-256-GCM and an Argon2id-derived key. The master password lives in RAM, zeroized on lock — and there's no cloud to breach.</p>
       </div>
       <div class="card">
-        <div class="icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div>
-        <h3>Tor, WARP, or your own proxy</h3>
-        <p>Route any tab through Tor or Cloudflare WARP with one click, or point NEXUS at a proxy you already trust. No extra client to configure.</p>
+        <div class="icon"><svg viewBox="0 0 24 24"><path d="M9.9 5a10.4 10.4 0 0 1 2.1-.2c7 0 10 7 10 7a13 13 0 0 1-1.7 2.7M6.6 6.6A13.5 13.5 0 0 0 2 12s3 7 10 7a9.7 9.7 0 0 0 5.4-1.6M10 10a3 3 0 1 0 4 4"/><path d="M2 2l20 20"/></svg></div>
+        <h3>Private tabs, actually private</h3>
+        <p>Private tabs skip history, session restore and password saving by design — not by toggling three settings and hoping.</p>
       </div>
       <div class="card">
-        <div class="icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/></svg></div>
-        <h3>AI assistant, your key</h3>
-        <p>Point it at Claude, GPT, Qwen, GLM, or any compatible endpoint. Prompts go straight from your machine to that API — never through a NEXUS server.</p>
+        <div class="icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div>
+        <h3>Secure DNS</h3>
+        <p>Domain lookups go through encrypted DNS-over-HTTPS — Cloudflare, Google, or your own resolver — with a TTL cache so pages don't pay the round-trip twice.</p>
       </div>
       <div class="card">
-        <div class="icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+        <div class="icon"><svg viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M5 21h14"/></svg></div>
+        <h3>16-thread downloads</h3>
+        <p>File links are detected automatically and pulled down in 16 parallel range requests with a live progress bar. Single-stream fallback when the server can't.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24"><path d="M19.4 7.9c0 .3.1.6.3.9l1.6 1.5c.5.5.7 1.1.7 1.7s-.2 1.2-.7 1.7l-1.6 1.6c-.2.2-.6.3-.9.3-.5-.1-.8-.5-1-.9a2.5 2.5 0 1 0-3.2 3.2c.4.2.9.5 1 1 0 .3-.2.7-.3.9l-1.6 1.6c-.5.5-1.1.7-1.7.7s-1.2-.2-1.7-.7l-1.6-1.6c-.2-.2-.6-.3-.9-.3-.5.1-.8.5-1 .9a2.5 2.5 0 1 1-3.2-3.2c.4-.2.9-.5 1-1 0-.3-.2-.6-.3-.8L1.7 13.7c-.5-.5-.7-1.1-.7-1.7s.2-1.2.7-1.7l1.6-1.6c.2-.3.6-.4.9-.3.5.1.8.5 1 .9a2.5 2.5 0 1 0 3.2-3.2c-.4-.2-.9-.5-1-1 0-.3.2-.6.3-.8l1.6-1.7c.5-.4 1.1-.7 1.7-.7s1.2.3 1.7.7l1.6 1.6c.2.3.6.4.9.3z"/></svg></div>
+        <h3>Extension support</h3>
+        <p>Nexus implements enough of <code>chrome.runtime</code> that many Manifest-style content scripts run unmodified from <code>nexus_extensions/</code>.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9z"/></svg></div>
         <h3>Built to idle light</h3>
-        <p>A shared, tuned connection pool and automatic tab suspension mean a background tab costs you almost nothing until you click back to it.</p>
+        <p>Background tabs are suspended after five minutes — the connection pool is released, the page stays cached and snaps back instantly when you click it.</p>
       </div>
-      <div class="card">
-        <div class="icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></div>
-        <h3>Chrome-style extensions</h3>
-        <p>NEXUS polyfills <code class="mono" style="font-size:.85em">chrome.runtime</code>, so many Manifest-style extensions install and run with no rewrite needed.</p>
+    </div>
+  </div>
+</section>
+
+<section id="shield">
+  <div class="container">
+    <span class="sec-label">Shield</span>
+    <h2 class="sec-title">Blocking, at two layers</h2>
+    <p class="sec-sub">Most browsers block inside the page and hope that's enough. Nexus also stops known ad and tracking domains at the network layer — the request never leaves your machine.</p>
+
+    <div class="layers">
+      <div class="layer">
+        <div class="icon"><svg viewBox="0 0 24 24"><path d="M12 3l7 3.5V12c0 4.6-3.1 7.9-7 9.5-3.9-1.6-7-4.9-7-9.5V6.5z"/></svg></div>
+        <span class="tag">Layer 1 · network</span>
+        <h3>Sinkhole</h3>
+        <p>Known ad/tracker domains (doubleclick, taboola, criteo, google-analytics…) are dropped before DNS is even queried. The request is refused locally — nothing to log on the other end.</p>
       </div>
-      <div class="card">
-        <div class="icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg></div>
-        <h3>Import in one file</h3>
-        <p>Bookmarks come in through the standard Netscape HTML export, so moving from Chrome, Firefox, or Edge is one file — not an account migration.</p>
+      <div class="layer-arrow"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+      <div class="layer">
+        <div class="icon"><svg viewBox="0 0 24 24"><path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/></svg></div>
+        <span class="tag">Layer 2 · the page</span>
+        <h3>In-page hooks</h3>
+        <p>What slips through the network layer gets stopped in the page: fetch, XHR, beacons, WebSockets — and ad script/image/iframe nodes are stripped as they appear.</p>
       </div>
+    </div>
+
+    <div class="levels">
+      <div class="level st">
+        <span class="lv">Recommended</span>
+        <h3>Strict</h3>
+        <ul>
+          <li><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>Ads + trackers blocked</li>
+          <li><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>Tracking cookies filtered</li>
+          <li><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>Anti-fingerprinting on</li>
+          <li><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>Some sites may misbehave</li>
+        </ul>
+      </div>
+      <div class="level ba">
+        <span class="lv">Default</span>
+        <h3>Balanced</h3>
+        <ul>
+          <li><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>Ads + obvious trackers</li>
+          <li><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>Fewer site breakages</li>
+          <li><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>One click per tab</li>
+        </ul>
+      </div>
+      <div class="level of">
+        <span class="lv">Your call</span>
+        <h3>Off</h3>
+        <ul>
+          <li><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>No blocking on that tab</li>
+          <li><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>For the one site that breaks</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="dnsbar">
+      <div class="icon"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01"/></svg></div>
+      <p><b>Secure DNS</b> — lookups go through encrypted DNS-over-HTTPS (Cloudflare, Google, or your own
+        resolver), so your ISP can't build a browsing profile from DNS queries. TTL-cached, with a fallback
+        to system DNS if the resolver is unreachable.</p>
     </div>
   </div>
 </section>
 
 <section id="compare">
   <div class="container">
-    <div class="eyebrow-label">// compare</div>
-    <h2 class="section-title">How it stacks up</h2>
-    <p class="section-sub">An honest comparison — including where NEXUS is still catching up.</p>
+    <span class="sec-label">Compare</span>
+    <h2 class="sec-title">Nexus vs. Brave vs. Firefox</h2>
+    <p class="sec-sub">An honest comparison — including where Nexus is still catching up.</p>
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Feature</th><th>Nexus</th><th>Chrome</th><th>Brave</th></tr>
+          <tr><th>Feature</th><th class="nx">Nexus</th><th>Brave</th><th>Firefox</th></tr>
         </thead>
         <tbody>
-          <tr><td>Core engine</td><td>Rust + OS WebView</td><td>Chromium (C++)</td><td>Chromium (C++)</td></tr>
-          <tr><td>Idle memory footprint</td><td class="mk-good">Low</td><td class="mk-bad">High</td><td class="mk-warn">Moderate</td></tr>
-          <tr><td>Telemetry</td><td class="mk-good">None</td><td class="mk-bad">Heavy</td><td class="mk-warn">Anonymized</td></tr>
-          <tr><td>Complex web-app support</td><td class="mk-warn">Good, not universal</td><td class="mk-good">Complete</td><td class="mk-good">Complete</td></tr>
-          <tr><td>Ad &amp; tracker blocking</td><td class="mk-good">Built in</td><td class="mk-bad">Extension required</td><td class="mk-good">Built in</td></tr>
-          <tr><td>Native AI, bring-your-own-key</td><td class="mk-good">Yes</td><td class="mk-bad">No</td><td class="mk-warn">Brave Leo only</td></tr>
-          <tr><td>Password vault encryption</td><td class="mk-good">AES-256-GCM + Argon2id</td><td class="mk-warn">Basic</td><td class="mk-warn">Basic</td></tr>
-          <tr><td>Funding</td><td class="mk-good">None — no VC, no ads</td><td class="mk-bad">Ad revenue</td><td class="mk-warn">Crypto + ads</td></tr>
+          <tr><td>Core engine</td><td class="nx mk-good">Rust + OS WebView</td><td>Chromium (C++)</td><td>Gecko (C++/Rust)</td></tr>
+          <tr><td>Telemetry</td><td class="nx mk-good">None</td><td class="mk-warn">Anonymized ping</td><td class="mk-warn">Opt-out</td></tr>
+          <tr><td>Ad &amp; tracker blocking</td><td class="nx mk-good">Built in, 2 layers</td><td class="mk-good">Built in</td><td class="mk-bad">Extension needed</td></tr>
+          <tr><td>Network-layer blocking</td><td class="nx mk-good">Sinkhole</td><td class="mk-good">Yes</td><td class="mk-bad">Via extensions</td></tr>
+          <tr><td>Fingerprint protection</td><td class="nx mk-warn">Basic (canvas/WebGL)</td><td class="mk-good">Farbling, strong</td><td class="mk-warn">RFP, partial</td></tr>
+          <tr><td>Secure DNS (DoH)</td><td class="nx mk-good">1.1.1.1 / custom</td><td class="mk-good">Yes</td><td class="mk-good">Yes</td></tr>
+          <tr><td>Per-site block details</td><td class="nx mk-good">Every domain, per page</td><td class="mk-warn">Counts only</td><td class="mk-bad">Not shown</td></tr>
+          <tr><td>Password vault encryption</td><td class="nx mk-good">AES-256-GCM + Argon2id</td><td class="mk-warn">OS keychain</td><td class="mk-warn">OS keychain</td></tr>
+          <tr><td>Idle memory</td><td class="nx mk-good">Low</td><td class="mk-bad">Moderate–high</td><td class="mk-warn">Moderate</td></tr>
+          <tr><td>Complex web apps</td><td class="nx mk-warn">Good, not universal</td><td class="mk-good">Complete</td><td class="mk-good">Complete</td></tr>
+          <tr><td>Funding</td><td class="nx mk-good">None — no VC, no ads</td><td class="mk-warn">Crypto + ads</td><td class="mk-warn">Search deals</td></tr>
         </tbody>
       </table>
     </div>
-    <p class="table-note">// NEXUS uses the OS's native WebView rather than shipping Chromium — that's most of the memory savings, and the occasional compatibility gap.</p>
+    <p class="table-note">Nexus uses the OS's native WebView rather than shipping a browser engine — that's most of the memory savings, and the occasional compatibility gap.</p>
+  </div>
+</section>
+
+<section id="shortcuts">
+  <div class="container">
+    <span class="sec-label">Shortcuts</span>
+    <h2 class="sec-title">Muscle memory, kept</h2>
+    <p class="sec-sub">The same shortcuts you already know from every other browser — nothing re-invented for the sake of being different.</p>
+    <div class="keys-grid">
+      <div class="krow"><span>New tab</span><span><kbd>Ctrl</kbd> <kbd>T</kbd></span></div>
+      <div class="krow"><span>Private tab</span><span><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>N</kbd></span></div>
+      <div class="krow"><span>Close tab</span><span><kbd>Ctrl</kbd> <kbd>W</kbd></span></div>
+      <div class="krow"><span>Focus address bar</span><span><kbd>Ctrl</kbd> <kbd>L</kbd></span></div>
+      <div class="krow"><span>Bookmark page</span><span><kbd>Ctrl</kbd> <kbd>D</kbd></span></div>
+      <div class="krow"><span>Reload</span><span><kbd>Ctrl</kbd> <kbd>R</kbd> / <kbd>F5</kbd></span></div>
+      <div class="krow"><span>Back / forward</span><span><kbd>Alt</kbd> <kbd>←</kbd> / <kbd>→</kbd></span></div>
+      <div class="krow"><span>Switch tabs</span><span><kbd>Ctrl</kbd> <kbd>Tab</kbd> · <kbd>Ctrl</kbd> <kbd>1–9</kbd></span></div>
+      <div class="krow"><span>Downloads</span><span><kbd>Ctrl</kbd> <kbd>J</kbd></span></div>
+      <div class="krow"><span>History</span><span><kbd>Ctrl</kbd> <kbd>H</kbd></span></div>
+      <div class="krow"><span>Developer console</span><span><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>I</kbd></span></div>
+      <div class="krow"><span>Dismiss any popup</span><span><kbd>Esc</kbd></span></div>
+    </div>
   </div>
 </section>
 
@@ -350,23 +510,23 @@
   <div class="container">
     <div class="oss">
       <div>
-        <div class="eyebrow-label">// open source</div>
-        <h2 class="section-title" style="margin-bottom:0">Nothing to audit means nothing to hide.</h2>
-        <p>NEXUS isn't a company with a browser as its product. It's a Rust codebase anyone can read, fork, and
+        <span class="sec-label">Open source</span>
+        <h2 class="sec-title" style="margin-bottom:0">Nothing to audit means nothing to hide.</h2>
+        <p>Nexus isn't a company with a browser as its product. It's a Rust codebase anyone can read, fork, and
           build on. There's no telemetry to disable because none was ever wired in — and no roadmap driven
           by a term sheet, because there isn't one.</p>
         <ul class="oss-list">
-          <li><span class="ok">✓</span> Every line of the engine is on GitHub, not just the marketing claims</li>
-          <li><span class="ok">✓</span> Dual-licensed under MPL-2.0 and Apache-2.0 — use it commercially, fork it freely</li>
-          <li><span class="ok">✓</span> Maintained by contributors, not a company with a growth target</li>
-          <li><span class="ok">✓</span> Free forever — there is no paid tier waiting behind a feature flag</li>
+          <li><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>Every line of the engine is on GitHub, not just the marketing claims</li>
+          <li><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>MPL-2.0 — use it commercially, fork it freely</li>
+          <li><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>Maintained by contributors, not a company with a growth target</li>
+          <li><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>Free forever — there is no paid tier waiting behind a feature flag</li>
         </ul>
       </div>
-      <div class="license-card mono">
+      <div class="license-card">
         <span class="k">Repository</span>
-        <span class="v">github.com/LocShadowVN/nexus-browser</span>
+        <span class="v">github.com/LocShadowVN/NexusBrowser</span>
         <span class="k">License</span>
-        <span class="v">MPL-2.0 + Apache-2.0</span>
+        <span class="v">MPL-2.0</span>
         <span class="k">Monetization</span>
         <span class="v">None</span>
       </div>
@@ -376,28 +536,39 @@
 
 <section id="faq">
   <div class="container" style="max-width:760px">
-    <div class="eyebrow-label">// faq</div>
-    <h2 class="section-title">Questions people actually ask</h2>
-    <div style="margin-top:36px">
+    <span class="sec-label">FAQ</span>
+    <h2 class="sec-title">Questions people actually ask</h2>
+    <div style="margin-top:32px">
       <details open>
-        <summary>Is NEXUS a drop-in replacement for Chrome or Brave?</summary>
-        <p>For everyday browsing — reading, search, video, most web apps — yes. NEXUS runs on your OS's
-          native WebView instead of shipping Chromium, which is where the memory savings come from. A small
-          number of very complex web apps may behave slightly differently than they do on Chromium.</p>
+        <summary>Is Nexus a drop-in replacement for Brave or Firefox?
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></summary>
+        <p>For everyday browsing — reading, search, video, most web apps — yes. Nexus renders pages through
+          your OS's native WebView instead of shipping its own engine, which is where the memory savings come
+          from. A small number of very complex web apps may behave slightly differently.</p>
       </details>
       <details>
-        <summary>How does the AI assistant actually work?</summary>
-        <p>You provide your own API endpoint, key, and model — Claude, GPT, Qwen, GLM, or anything else that
-          speaks a compatible API. Requests go directly from your machine to that provider. NEXUS never sees
-          your prompts and has no server in between.</p>
+        <summary>What exactly does the Shield button show me?
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></summary>
+        <p>Tap it and you see the count, plus every domain blocked on the current page — grouped by type
+          (Ad / Tracker) and hit count — and the blocked-list totals from the network layer. You can switch
+          the tab between Strict, Balanced and Off right there.</p>
       </details>
       <details>
-        <summary>Do I need Tor or WARP installed separately?</summary>
-        <p>Yes. NEXUS has a one-click toggle to route a tab through Tor or Cloudflare WARP, but it needs
-          their official client running in the background — NEXUS doesn't bundle or replace either one.</p>
+        <summary>Does Secure DNS slow browsing down?
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></summary>
+        <p>Resolved names are cached with their real TTL, so each domain costs one encrypted round-trip
+          and then nothing. If the resolver is unreachable, Nexus falls back to system DNS rather than
+          failing to load pages.</p>
       </details>
       <details>
-        <summary>Who's behind this?</summary>
+        <summary>If I forget my vault master password, can you recover it?
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></summary>
+        <p>No — and that's the point. Passwords are encrypted with a key derived from your master password
+          on your machine. There's no reset link, no support ticket, no backdoor.</p>
+      </details>
+      <details>
+        <summary>Who's behind this?
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></summary>
         <p>No company — an individual maintainer plus whoever from the community wants to contribute. There's
           no roadmap dictated by investors, and no plan to monetize it later.</p>
       </details>
@@ -407,64 +578,36 @@
 
 <footer>
   <div class="container">
-    <p class="mono">Built with Rust. &copy; <span id="year"></span> NEXUS — <a href="https://github.com/LocShadowVN/nexus-browser" target="_blank" rel="noopener">source on GitHub</a></p>
+    Built with Rust. &copy; <span id="year"></span> Nexus —
+    <a href="https://github.com/LocShadowVN/NexusBrowser" target="_blank" rel="noopener">source on GitHub</a>
   </div>
 </footer>
 
 <script>
   document.getElementById('year').textContent = new Date().getFullYear();
 
-  // ---- theme ----
+  // ---- theme (light default, dark opt-in) ----
   const root = document.documentElement;
   const iconSun = document.getElementById('iconSun');
   const iconMoon = document.getElementById('iconMoon');
-  function applyThemeIcon(isLight){
-    iconSun.style.display = isLight ? 'block' : 'none';
-    iconMoon.style.display = isLight ? 'none' : 'block';
+  function applyThemeIcon(isDark){
+    iconSun.style.display = isDark ? 'none' : 'block';
+    iconMoon.style.display = isDark ? 'block' : 'none';
   }
   function toggleTheme(){
-    const isLight = root.classList.toggle('light');
-    applyThemeIcon(isLight);
-    try { localStorage.setItem('nexus-site-theme', isLight ? 'light' : 'dark'); } catch(e){}
+    const isDark = root.classList.toggle('dark');
+    applyThemeIcon(isDark);
+    try { localStorage.setItem('nexus-site-theme', isDark ? 'dark' : 'light'); } catch(e){}
   }
   (function initTheme(){
     let saved = null;
     try { saved = localStorage.getItem('nexus-site-theme'); } catch(e){}
-    let isLight;
-    if (saved === 'light' || saved === 'dark') isLight = saved === 'light';
-    else isLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
-    if (isLight) root.classList.add('light');
-    applyThemeIcon(isLight);
+    let isDark;
+    if (saved === 'light' || saved === 'dark') isDark = saved === 'dark';
+    else isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    root.classList.toggle('dark', isDark);
+    applyThemeIcon(isDark);
   })();
-
-  // ---- terminal boot typewriter ----
-  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const lines = document.querySelectorAll('#termBody .term-line');
-  if (reduceMotion) {
-    lines.forEach(l => l.classList.add('show'));
-  } else {
-    lines.forEach((l, i) => setTimeout(() => l.classList.add('show'), 260 * i + 200));
-  }
-
-  // ---- ram gauge reveal on scroll ----
-  const gNexus = document.getElementById('gaugeNexus');
-  const gChromium = document.getElementById('gaugeChromium');
-  const term = document.getElementById('termPanel');
-  if ('IntersectionObserver' in window) {
-    const io = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          gNexus.style.width = '22%';
-          gChromium.style.width = '78%';
-          io.disconnect();
-        }
-      });
-    }, { threshold: 0.4 });
-    io.observe(term);
-  } else {
-    gNexus.style.width = '22%';
-    gChromium.style.width = '78%';
-  }
 </script>
 </body>
 </html>
