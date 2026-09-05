@@ -1,117 +1,185 @@
-<div align="center">
-  <img src="nexus-banner.svg" alt="NEXUS Browser" width="600"/>
+# NEXUS
 
-  <p><b>A privacy-first, high-performance desktop browser, built from scratch in Rust.</b></p>
+**A privacy-first desktop browser, built from scratch in Rust.**
 
-  [![Rust](https://img.shields.io/badge/Built_with-Rust-CE422B?logo=rust&logoColor=white)](https://www.rust-lang.org/)
-  [![License](https://img.shields.io/badge/License-MPL%202.0%20OR%20Apache--2.0-blue)](LICENSE)
-  [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-informational)](#system-requirements)
-</div>
+[![Built with Rust](https://img.shields.io/badge/built_with-Rust-CE422B?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue)](LICENSE)
+[![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-informational)](#system-requirements)
 
-<br>
+---
 
-## Table of Contents
+## Contents
+
 - [Introduction](#introduction)
+- [Features](#features)
 - [How It Compares](#how-it-compares)
-- [Key Features](#key-features)
+- [Installation](#installation)
 - [System Requirements](#system-requirements)
-- [Tor & WARP Setup](#tor--warp-setup)
-- [AI Assistant Setup](#ai-assistant-setup)
+- [Data & Storage](#data--storage)
+- [Keyboard Shortcuts](#keyboard-shortcuts)
+- [Known Limitations](#known-limitations)
 - [Development Notes](#development-notes)
 - [Contributing](#contributing)
 - [License](#license)
 
 ## Introduction
 
-NEXUS is a desktop browser built from the ground up in Rust, on top of `wry` and `tao` rather than a full Chromium build. The goal is straightforward: a browser that doesn't phone home, doesn't need a paid tier, and doesn't quietly eat your RAM in the background.
+NEXUS is a desktop browser written in Rust on top of `wry` and `tao` — not a Chromium fork. Every request a page makes goes through a Rust-controlled pipeline first, which is what makes its blocking, cookie handling and DNS possible at all.
 
-It ships with an encrypted password vault, ad/tracker blocking, one-click Tor and Cloudflare WARP routing, and a native AI assistant you connect with your own API key — nothing sits between you and the model you choose.
+The goal is simple: a browser that doesn't phone home, doesn't need an account, and doesn't quietly eat your RAM while you're not looking.
+
+## Features
+
+### Shield — blocking at two layers
+
+| Layer | What it does |
+|---|---|
+| **1 · Network** | Known ad/tracker domains (doubleclick, taboola, criteo, google-analytics, …) are dropped before the request ever leaves your machine |
+| **2 · The page** | Whatever slips through gets stopped in-page: `fetch`, XHR, beacons, WebSockets, and ad script/image/iframe nodes stripped as they appear |
+
+Each tab runs at one of three levels, switchable from the Shield button on the toolbar:
+
+| Level | Behavior |
+|---|---|
+| **Strict** | Ads, trackers, tracking cookies and fingerprinting — all blocked. Some sites may break |
+| **Balanced** *(default)* | Ads and obvious trackers blocked, fewer site breakages |
+| **Off** | No blocking on that tab, for the one site that misbehaves |
+
+The Shield button shows the count **and every domain blocked on the current page**, grouped by type (Ad / Tracker) with hit counts.
+
+### Privacy & security
+
+- HTTPS upgrading, and tracking parameters (`utm_*`, `gclid`, `fbclid`, `msclkid`) stripped from URLs
+- Tracking cookies (`_ga`, `_fbp`, `_hj`, …) filtered
+- Anti-fingerprinting: canvas, WebGL vendor and hardware info are blurred
+- Private tabs skip history, session restore and password saving by design
+
+> Anti-fingerprinting reduces what a site can read about your machine — it is not full anonymity.
+
+### Secure DNS
+
+Domain lookups go through encrypted DNS-over-HTTPS — Cloudflare (`1.1.1.1`), Google, or your own resolver — so your ISP can't build a browsing profile from DNS queries. Results are cached with their real TTL; if the resolver is unreachable, NEXUS falls back to system DNS instead of failing.
+
+### Encrypted vault
+
+Passwords are stored locally, encrypted with **AES-256-GCM**, key derived via **Argon2id**. The master password lives in RAM and is zeroized on lock. Nothing syncs to a server, because there isn't one — forget the master password and the vault is gone (that's the design, not a bug).
+
+### Downloads
+
+- File links (.zip, .pdf, .exe, …) detected automatically
+- Up to **16 parallel range requests** with a live progress bar
+- Single-stream fallback when the server doesn't support ranges
+
+### Performance
+
+- Background tabs idle for 5+ minutes are suspended — connection pool released, page cached, snaps back instantly on click
+- Built on Tokio's async runtime for non-blocking networking
+
+### Extensions
+
+NEXUS implements enough of `chrome.runtime` that many Manifest-style content scripts run unmodified. Drop an extension folder into `nexus_extensions/` and toggle it in Settings.
 
 ## How It Compares
 
-The numbers below are from our own casual testing, not an independent benchmark — treat them as a general shape, not a guarantee.
+| | NEXUS | Chrome | Brave | Firefox |
+|---|:---:|:---:|:---:|:---:|
+| Core engine | Rust + OS WebView | Chromium (C++) | Chromium (C++) | Gecko (C++/Rust) |
+| Telemetry | None | Heavy | Anonymized | Opt-out |
+| Ad & tracker blocking | Built-in, 2 layers | Extension required | Built-in | Extension required |
+| Network-layer blocking | Yes (sinkhole) | No | Yes | Via extensions |
+| Secure DNS (DoH) | 1.1.1.1 / custom | Yes | Yes | Yes |
+| Per-site block details | Every domain, per page | Counts only | Counts only | Not shown |
+| Password vault encryption | AES-256-GCM + Argon2id | OS keychain | OS keychain | OS keychain |
+| Idle memory | Low | High | Moderate | Moderate |
+| Complex web apps | Good, not universal | Complete | Complete | Complete |
+| Funding | None | Ad revenue | Crypto + ads | Search deals |
 
-| Feature | NEXUS | Chrome | Brave |
-|---|:---:|:---:|:---:|
-| Core engine | Rust + OS WebView | Chromium (C++) | Chromium (C++) |
-| Telemetry | None | Heavy | Anonymized |
-| Idle RAM (approx.) | Low | High | Moderate |
-| Ad / tracker blocking | Built in | Extension required | Built in |
-| Password vault | AES-256-GCM + Argon2id | Basic | Basic |
-| Tor / WARP, one click | Yes | No | No (Tor only via a separate extension) |
-| Native AI, bring-your-own-key | Yes | No | Brave Leo only |
-| Multi-threaded downloads | Yes, segmented | Limited | Limited |
-| Complex web-app compatibility | Good, not universal | Complete | Complete |
+NEXUS renders pages through the OS's native WebView instead of shipping a browser engine — that's most of the memory savings, and the occasional compatibility gap.
 
-NEXUS runs on the OS's native WebView instead of shipping Chromium — that's most of where the memory savings come from, and also where the occasional compatibility gap with very complex web apps comes from.
+## Installation
 
-## Key Features
+Prebuilt binaries for every release:
 
-### Privacy & Security
-- Ad and tracker blocking, including YouTube ad-skip
-- Blocks common tracking cookies and intercepts tracker-related `fetch` / `XHR` / `sendBeacon` calls
-- Reduces canvas/WebGL/hardware-concurrency fingerprinting surface
-- DNS-level sinkhole for known ad and malware domains
-- HTTPS upgrading and stripping of tracking parameters (`utm_*`, `gclid`, `fbclid`) from URLs
+| Platform | File |
+|---|---|
+| Windows 10/11 (x64) | `nexus-windows-x64.zip` — extract, run `nexus.exe` |
+| Linux (x64) | `nexus-linux-x64.deb` — `sudo dpkg -i nexus-linux-x64.deb` |
+| Linux (x64, portable) | `nexus-linux-x64.AppImage` — `chmod +x`, run |
+| macOS (x64) | `nexus-macos-x64.zip` — extract, run |
 
-> Anti-fingerprinting reduces what a site can read about your machine — it isn't full anonymity. Pair it with Tor if that's what you need.
+Latest release: **https://github.com/LocShadowVN/NexusBrowser/releases/latest**
 
-### Encrypted Vault
-Passwords are stored locally, encrypted with AES-256-GCM, with the key derived via Argon2id. Nothing syncs to a server, because there isn't one.
+Or build from source:
 
-### AI Assistant
-A toolbar-integrated assistant you configure with your own API endpoint, key, and model — Claude, Qwen, GLM, GPT, or anything else that speaks a compatible API. Requests go straight from your machine to that provider.
-
-### Performance
-- Background tabs idle for 5+ minutes are automatically suspended to free up RAM and CPU
-- Downloads split into up to 16 concurrent chunks on servers that support range requests — actual speedup depends on your connection and the server, not a fixed number
-- Built on Tokio's async runtime for non-blocking networking
-
-### Anonymity
-- One-click routing of a tab through Tor or Cloudflare WARP (requires their official client already running locally — see setup below)
+```bash
+git clone https://github.com/LocShadowVN/NexusBrowser
+cd NexusBrowser
+cargo build --release
+```
 
 ## System Requirements
 
 | Component | Minimum |
 |---|---|
-| **OS** | Windows 10/11 (64-bit), macOS 11+ (Big Sur), Linux (Ubuntu 20.04+, Fedora 34+, Arch) |
-| **CPU** | Dual-core 64-bit (Intel Core i3 / AMD Ryzen 3 class or better) |
-| **RAM** | 2 GB (NEXUS itself idles low; web pages will use their own memory as usual) |
-| **Storage** | 150 MB free |
-| **Graphics** | WebGL support (integrated graphics such as Intel UHD are fine) |
+| OS | Windows 10/11 (64-bit), macOS 11+, Ubuntu 20.04+ / Fedora 34+ / Arch |
+| CPU | Dual-core 64-bit |
+| RAM | 2 GB |
+| Storage | 150 MB free |
 
-## Tor & WARP Setup
+Linux additionally needs WebKitGTK 4.1 and GTK 3 (pulled automatically by the `.deb`).
 
-The one-click Tor / WARP toggles in NEXUS route traffic through a local proxy — they don't bundle or replace either client, so you need the real thing running first:
+## Data & Storage
 
-1. **Tor:** install [Tor Browser](https://www.torproject.org/download/) or the Tor daemon, and make sure it's listening on `127.0.0.1:9050`.
-2. **Cloudflare WARP:** install [Cloudflare WARP](https://1.1.1.1/), and make sure it's actually running in **local proxy mode** on `127.0.0.1:2053` — the default consumer toggle runs WARP as a system-wide VPN instead, which won't work with this integration.
+Everything lives next to the executable — no hidden profile folders:
 
-Once one of those is genuinely listening, flip the matching switch in the NEXUS sidebar.
+| File / folder | Contents |
+|---|---|
+| `session.json` | Open tabs for next launch (private tabs excluded) |
+| `bookmarks.json` | Bookmarks |
+| `history.json` | Browsing history, private tabs excluded (max 2000 entries) |
+| `config.json` | Settings |
+| `nexus_vault.dat` | Encrypted password vault |
+| `nexus_extensions/` | Extensions |
+| `downloads/` | Downloaded files |
 
-## AI Assistant Setup
+## Keyboard Shortcuts
 
-1. Open NEXUS and click the AI icon in the toolbar.
-2. Enter an API endpoint (e.g. `https://api.anthropic.com/v1/messages`, `https://api.openai.com/v1/chat/completions`, or a local server).
-3. Enter your API key.
-4. Enter the model name (e.g. `claude-sonnet-4-6`, `qwen-max`, `glm-5.2`).
-5. Save and start chatting.
+| Shortcut | Action |
+|---|---|
+| `Ctrl + T` / `Ctrl + Shift + N` | New tab / new private tab |
+| `Ctrl + W` | Close tab |
+| `Ctrl + L` | Focus address bar |
+| `Ctrl + D` | Bookmark page |
+| `Ctrl + R` / `F5` | Reload |
+| `Alt + ←` / `→` | Back / forward |
+| `Ctrl + Tab` / `Ctrl + 1–9` | Switch tabs |
+| `Ctrl + J` / `Ctrl + H` | Downloads / history |
+| `Ctrl + Shift + I` | Developer console |
+| `Esc` | Dismiss open popup |
 
-Your prompts go directly to whichever endpoint you configure — NEXUS doesn't proxy or log them.
+## Known Limitations
+
+Honest ones, so you know what you're installing:
+
+- **Complex web apps** — pages that depend on localStorage or SPA routing may not work fully, because NEXUS renders pages through its own pipeline to keep blocking and cookies under Rust's control
+- **File uploads** — multipart POSTs are sent directly from the page; the response isn't re-rendered
+- **Browser import** — the Chrome/Firefox/Edge import is a stub
+- **Fingerprinting** — reduced, not eliminated; Brave's farbling is stronger
 
 ## Development Notes
 
-NEXUS is written and maintained by [**@LocShadowVN**](https://github.com/LocShadowVN), with AI coding assistants (Claude, Qwen, GLM) used throughout the build for implementation help and debugging. The architecture, tradeoffs, and final review are human-driven — the AI tools sped up typing, not decision-making.
+Everything lives in a single `src/main.rs`, organized into modules: `state`, `net`, `doh`, `sinkhole`, `injection`, `vault`, `sync`, `extensions`, `dl`, `search`, plus the embedded UI and the IPC bridge.
+
+Maintained by [@LocShadowVN](https://github.com/LocShadowVN), with AI coding assistants used for implementation help and debugging — the architecture, tradeoffs and final review are human-driven.
 
 ## Contributing
 
-NEXUS is open to contributions from the Rust community and privacy-minded developers. Found a bug or have a feature idea? Open an issue or a pull request.
+Bug reports, feature ideas and pull requests are all welcome — especially from Rust developers who care about privacy.
 
 ## License
 
-Distributed under **MPL-2.0 OR Apache-2.0** — see LICENSE-MPL and LICENSE-APACHE for details. No paid tier, no plans for one.
+Distributed under **MPL-2.0** — see [LICENSE](LICENSE). No paid tier, no plans for one.
 
-<div align="center">
-<br>
-Built in Rust, by one developer who'd rather own a browser than rent one. 🦀
-</div>
+---
+
+Built in Rust, by one developer who'd rather own a browser than rent one.
