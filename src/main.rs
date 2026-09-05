@@ -104,7 +104,7 @@ mod state {
 
     impl TabState {
         pub fn new(mode: TabMode) -> Self {
-            // R7: defaults aligned with the Balanced profile (apply_global overrides anyway)
+            // defaults aligned with the Balanced profile (apply_global overrides anyway)
             Self {
                 id: Uuid::new_v4(),
                 name: match mode {
@@ -175,13 +175,13 @@ mod state {
     }
 
     // Apply global defaults (Settings → Privacy) to a tab.
-    // R5: same rules for every tab mode — private tabs get no *weaker* blocking.
+    // Same rules for every tab mode — private tabs get no *weaker* blocking.
     pub fn apply_global(g: &GlobalConfig, t: &mut TabState) {
         t.cfg.ad = g.ad; t.cfg.trk = g.trk; t.cfg.sinkhole = g.sinkhole;
         t.cfg.anti_fp = g.anti_fp; t.cfg.cookie = g.cookie;
     }
 
-    // R4: defaults = Balanced (matches what the UI, site and README claim)
+    // defaults = Balanced (matches what the UI, site and README claim)
     #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
     pub struct GlobalConfig {
         #[serde(default = "d_true")] pub ad: bool,
@@ -401,12 +401,15 @@ mod doh {
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
     }
 
+    // ✅ FIX compile: reqwest without the `json` feature has no .json() —
+    // parse with text() + serde_json instead.
     async fn query(endpoint: &str, host: &str, rtype: &str) -> Option<(Vec<std::net::IpAddr>, u64)> {
-        let v: JsonValue = BOOT.get(endpoint)
+        let text = BOOT.get(endpoint)
             .query(&[("name", host), ("type", rtype)])
             .header("accept", "application/dns-json")
             .send().await.ok()?
-            .json().await.ok()?;
+            .text().await.ok()?;
+        let v: JsonValue = serde_json::from_str(&text).ok()?;
         let ttl = v["Answer"].as_array()
             .and_then(|a| a.first())
             .and_then(|a| a["TTL"].as_u64())
@@ -1387,7 +1390,7 @@ function pushRlog(domain,kind){domain=String(domain||'');var f=null;
  for(var i=0;i<S.rlog.length;i++)if(S.rlog[i].domain===domain&&S.rlog[i].kind===kind){f=S.rlog[i];break}
  if(f)f.n++;else{S.rlog.push({domain:domain,kind:kind||'Blocked',n:1});if(S.rlog.length>300)S.rlog.shift()}}
 
-/* ===== protection profiles (R4: unified rules, cookie counted) ===== */
+/* ===== protection profiles (unified rules, cookie counted) ===== */
 var PROFILES={strict:{ad:true,trk:true,sinkhole:true,anti_fp:true,cookie:true},
  balanced:{ad:true,trk:true,sinkhole:false,anti_fp:false,cookie:false},
  off:{ad:false,trk:false,sinkhole:false,anti_fp:false,cookie:false}};
@@ -1565,7 +1568,7 @@ var SECS=[['look','Appearance',I.gear],['search','Search',I.search],['priv','Pri
  ['hist','History',I.clock],['bm','Bookmarks',I.book],['keys','Shortcuts',I.grid],
  ['dl','Downloads',I.dl],['ext','Extensions',I.grid],['vault','Vault',I.key],
  ['sync','Sync',I.copy],['adv','Advanced',I.info]];
-// R4: JS-side defaults mirror the Rust Balanced defaults
+// JS-side defaults mirror the Rust Balanced defaults
 var DEFB={secure_dns:false,sinkhole:false,anti_fp:false,cookie:false};
 function cfgB(k){var d=DEFB[k]!==undefined?DEFB[k]:true;return S.config[k]===undefined?d:!!S.config[k]}
 
@@ -1770,7 +1773,7 @@ function buildSettings(sec){
   if(it){it.classList.add('on');secs[sec].scrollIntoView()}}
 }
 
-/* ===== save-password popup (R2: never in private tabs) ===== */
+/* ===== save-password popup (never in private tabs) ===== */
 var ppT=0;
 function hidePassPop(){clearTimeout(ppT);$('#pass-pop').classList.remove('show')}
 function onPassDetected(p){if(!p||!p.password)return;
@@ -1919,8 +1922,12 @@ fn session_urls(g: &state::State) -> Vec<String> {
         .map(|t| t.url.clone()).collect()
 }
 
+// ✅ FIX compile: bind the guard, deref explicitly with &*g —
+// &st.read().await in one expression doesn't coerce to &State here.
 async fn persist_session(st: &Arc<RwLock<state::State>>) {
-    let urls = session_urls(&st.read().await);
+    let g = st.read().await;
+    let urls = session_urls(&*g);
+    drop(g);
     state::save_session(&urls).await;
 }
 
@@ -2025,7 +2032,7 @@ async fn handle_ipc(msg: String, st: Arc<RwLock<state::State>>, px: tao::event_l
             let (idx, u) = { let mut g = st.write().await; let idx = g.active_tab; (idx, g.active_tab_mut().go_fwd()) };
             if let Some(u) = u { load_url(u, idx, st.clone(), &px, false).await; }
         },
-        // R6: reload falls back to the tab URL when history is empty
+        // reload falls back to the tab URL when history is empty
         "reload" => {
             let (idx, u) = {
                 let g = st.read().await;
@@ -2294,7 +2301,7 @@ async fn load_url_method(url: String, tab_idx: usize, method: &str, body: Option
         let mut g = st.write().await;
         match g.tabs.get_mut(tab_idx) {
             Some(t) => { t.load_gen += 1; (t.cfg.clone(), t.load_gen) }
-            // R1: never leave the loadbar spinning
+            // never leave the loadbar spinning
             None => { ev(px, "load", json!({"on": false})); return; }
         }
     };
@@ -2347,7 +2354,7 @@ async fn load_url_method(url: String, tab_idx: usize, method: &str, body: Option
     // client (with Secure DNS pinning if enabled)
     let client = match client_for(&st, tab_idx, &clean_url).await {
         Some(c) => c,
-        // R1: never leave the loadbar spinning
+        // never leave the loadbar spinning
         None => { ev(px, "load", json!({"on": false})); return; }
     };
 
